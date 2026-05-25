@@ -2,7 +2,7 @@
 
 This module focuses on TD3 passport pages. It crops the MRZ zone, reads OCR
 candidates, validates check digits, extracts visual fields when MRZ names are
-weak, and applies country-specific rules from `country_rules`.
+weak, and applies country-specific rules from `src.countries`.
 """
 
 import re
@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 from src.core.flash_glance import flash_glance_hint
 from src.core.ocr_engine import get_document_engine, get_image_from_stream, improve_image_quality
-from src.document_ocr.country_rules import (
+from src.countries.registry import (
     get_country_profile,
     infer_country_profile,
     normalize_mrz_country,

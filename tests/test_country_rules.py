@@ -4,12 +4,12 @@ These tests do not run OCR. They verify the reusable rules that processors call
 after OCR has already produced text or structured fields.
 """
 
-from src.document_ocr.country_rules import (
+from src.countries.registry import (
     country_validation_summary,
     get_country_profile,
     normalize_mrz_country,
-    validate_nigerian_nin,
 )
+from src.countries.nigeria.rules import validate_nin
 
 
 def test_nigeria_profile_is_registered():
@@ -34,9 +34,9 @@ def test_unknown_country_passes_through_when_no_profile_matches():
 
 def test_nigerian_nin_format_validation():
     """Nigerian NIN validation should accept exactly 11 digits."""
-    assert validate_nigerian_nin("12345678901") is True
-    assert validate_nigerian_nin("12345") is False
-    assert validate_nigerian_nin("1234567890A") is False
+    assert validate_nin("12345678901") is True
+    assert validate_nin("12345") is False
+    assert validate_nin("1234567890A") is False
 
 
 def test_country_validation_summary_reports_document_and_nin_checks():

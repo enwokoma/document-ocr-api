@@ -2,7 +2,7 @@
 
 The parser reads text from an uploaded image, tries likely rotations, extracts
 fields by label and pattern, and returns a stable JSON shape. Country selection
-is handled through `country_rules` so future ID processors can share the route.
+is handled through `src.countries` so future ID processors can share the route.
 """
 
 import re
@@ -17,7 +17,7 @@ from src.core.ocr_engine import (
     get_image_from_stream,
     improve_image_quality,
 )
-from src.document_ocr.country_rules import country_validation_summary, get_country_profile
+from src.countries.registry import country_validation_summary, get_country_profile
 
 
 engine = get_document_engine()

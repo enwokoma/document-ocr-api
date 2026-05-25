@@ -1,8 +1,8 @@
 """Shared country-profile data shape.
 
 Country packages define their own profiles with this class. The registry in
-`country_rules.py` then imports those profiles and makes them available to the
-generic processors.
+`registry.py` imports those profiles and makes them available to the generic
+document processors.
 """
 
 from __future__ import annotations

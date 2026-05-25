@@ -23,15 +23,16 @@ document-ocr-api/
   src/
     api/
       routes.py
+    countries/
+      profile.py
+      registry.py
+      nigeria/
     core/
       auth.py
       flash_glance.py
       ocr_engine.py
     document_ocr/
-      country_profile.py
-      country_rules.py
       bank_statement/
-      nigeria/
       nin/
       passport/
     webhook_forwarder/
@@ -200,9 +201,9 @@ For a new document type:
 
 For country-specific logic:
 
-1. Create a country package under `src/document_ocr/<country>/`, for example `src/document_ocr/nigeria/`.
+1. Create a country package under `src/countries/<country>/`, for example `src/countries/nigeria/`.
 2. Put country-specific aliases, supported document types, and validation helpers in that package.
-3. Register the country's `CountryProfile` in `src/document_ocr/country_rules.py`.
+3. Register the country's `CountryProfile` in `src/countries/registry.py`.
 4. Keep shared OCR/parsing in the document processor.
 5. Return country codes and validation details explicitly in the response.
 

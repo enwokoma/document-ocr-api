@@ -1,16 +1,16 @@
 """Country-profile registry used by the OCR processors.
 
-The processors should stay focused on OCR and parsing. Country-specific logic
-lives in country folders such as `src/document_ocr/nigeria/`; this module only
-defines the shared profile shape and routes lookups to registered countries.
+The document processors should stay focused on OCR and parsing. Country-specific
+logic lives in country folders such as `src/countries/nigeria/`; this module only
+routes lookups to registered countries.
 """
 
 from __future__ import annotations
 
 from typing import Dict, Optional
 
-from src.document_ocr.country_profile import CountryProfile
-from src.document_ocr.nigeria.rules import NIGERIA_PROFILE, validate_nin as validate_nigerian_nin
+from src.countries.nigeria.rules import NIGERIA_PROFILE, validate_nin as validate_nigerian_nin
+from src.countries.profile import CountryProfile
 
 COUNTRY_PROFILES: Dict[str, CountryProfile] = {
     NIGERIA_PROFILE.code: NIGERIA_PROFILE,
@@ -44,11 +44,7 @@ def country_validation_summary(
     document_type: str,
     extracted_data: Dict[str, Optional[str]],
 ) -> Dict[str, object]:
-    """Return country-specific validation details for an OCR response.
-
-    The result is intentionally simple JSON so API clients can display or store
-    it without understanding Python classes.
-    """
+    """Return country-specific validation details for an OCR response."""
     profile = get_country_profile(country_code)
     if profile is None:
         return {

@@ -1,9 +1,8 @@
 """Nigeria-specific document rules.
 
 This module is the home for behavior that should not be shared globally. When
-another country is added, create a sibling package such as
-`src/document_ocr/ghana/` or `src/document_ocr/kenya/` instead of modifying the
-generic passport, NIN, or bank-statement processors.
+another country is added, create a sibling package such as `src/countries/ghana/`
+or `src/countries/kenya/` instead of modifying the generic document processors.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from src.document_ocr.country_profile import CountryProfile
+from src.countries.profile import CountryProfile
 
 
 NIGERIA_PROFILE = CountryProfile(
