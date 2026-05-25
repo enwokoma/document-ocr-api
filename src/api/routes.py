@@ -4,6 +4,8 @@ from src.document_ocr.nin.processor import extract_nin_from_image, nin_extractio
 from src.document_ocr.bank_statement.processor import extract_bank_statement_data
 from src.core.auth import verify_hmac
 
+# The API currently groups all document routes into one blueprint. The name is
+# historical; new document routes can be added here without changing app.py.
 passport_bp = Blueprint('passport', __name__)
 
 
@@ -64,11 +66,12 @@ def extract_passport():
 
 
 def process_raw_passport():
+    """Validate the upload and pass the image stream into the passport parser."""
     file = get_uploaded_file()
     if isinstance(file, tuple):
         return file
     try:
-        result = extract_mrz_from_image(file)
+        result = extract_mrz_from_image(file, country_hint=get_country_hint())
         return jsonify(result), 200 if result.get("success") else 400
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
@@ -103,7 +106,7 @@ def extract_nin():
     if isinstance(file, tuple):
         return file
     try:
-        result = extract_nin_from_image(file)
+        result = extract_nin_from_image(file, country_code=get_country_hint(default="NGA"))
         return jsonify(result), 200 if result.get("success") else 400
     except Exception as e:
         return jsonify(nin_extraction_error(str(e))), 500
@@ -146,10 +149,26 @@ def extract_statement():
 
 
 def get_uploaded_file():
+    """Return the uploaded file or a ready-to-send Flask error response.
+
+    Keeping this in one helper gives every endpoint the same missing-file and
+    empty-filename behavior.
+    """
     if 'file' not in request.files:
         return jsonify({"success": False, "message": "No file provided"}), 400
     file = request.files['file']
     if file.filename == '':
         return jsonify({"success": False, "message": "Invalid filename"}), 400
     return file
+
+
+def get_country_hint(default=None):
+    """Read an optional country hint from form data or query parameters.
+
+    The API accepts ISO-3166 alpha-3 codes such as `NGA`. Passport processing can
+    usually infer the country from MRZ text, but ID documents often need a hint
+    because local IDs do not share one universal layout.
+    """
+    value = request.form.get("country") or request.args.get("country") or default
+    return value.upper() if isinstance(value, str) and value.strip() else default
 

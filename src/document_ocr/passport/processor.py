@@ -3,13 +3,17 @@ import cv2
 import numpy as np
 from src.core.flash_glance import flash_glance_hint
 from src.core.ocr_engine import get_document_engine, get_image_from_stream, improve_image_quality
+from src.document_ocr.country_rules import (
+    get_country_profile,
+    infer_country_profile,
+    normalize_mrz_country,
+)
 
 engine = get_document_engine()
 
 _TD3_ALLOWED_RE = re.compile(r"^[A-Z0-9<]+$")
 _TD3_DATE_RE = re.compile(r"^[0-9]{6}$")
 _TD3_COUNTRY_RE = re.compile(r"^[A-Z]{3}$")
-_NIGERIA_COUNTRY_OCR_ALIASES = {"NGA", "NGE", "NG4", "N6A", "N64", "NGR"}
 _MRZ_GLARE_MAX_COMPONENT_PCT = 0.8
 _DATA_GLARE_MAX_COMPONENT_PCT = 1.5
 _LOCAL_GLARE_MAX_COMPONENT_PCT = 25.0
@@ -331,18 +335,16 @@ def _document_quality_issue(image) -> dict | None:
     return None
 
 
-def _is_probably_nigerian(country: str, nationality: str = "") -> bool:
-    return country in _NIGERIA_COUNTRY_OCR_ALIASES or nationality == "NGA"
-
-
 def _correct_line1_country(line1: str, line2: str) -> str:
+    """Correct the issuing-country field in MRZ line 1 when rules recognize it."""
     if not _looks_like_td3_line(line1) or len(line2) < 13:
         return line1
 
     country = line1[2:5]
     nationality = line2[10:13]
-    if country != "NGA" and _is_probably_nigerian(country, nationality):
-        return line1[:2] + "NGA" + line1[5:]
+    normalized_country = normalize_mrz_country(country, nationality)
+    if normalized_country and normalized_country != country:
+        return line1[:2] + normalized_country + line1[5:]
     return line1
 
 
@@ -509,6 +511,7 @@ def _should_prefer_visual_name(mrz_name: str, visual_name: str) -> bool:
 
 
 def _mrz_line1_score(line1: str, line2: str) -> int:
+    """Score an MRZ name line so the best OCR candidate can be selected."""
     line1 = _correct_line1_country(_normalize_td3_line1(line1), line2)
     if not _looks_like_td3_line1(line1):
         return -100
@@ -516,9 +519,10 @@ def _mrz_line1_score(line1: str, line2: str) -> int:
     surname, given_names = _parse_names_from_line1(line1)
     compact_surname = surname.replace(" ", "")
     compact_given = given_names.replace(" ", "")
+    profile = infer_country_profile(line1[2:5], line2[10:13])
     score = 0
     score += 20 if line1[0] == "P" else 0
-    score += 20 if line1[2:5] == "NGA" else 0
+    score += 20 if profile is not None else 0
     score += min(len(compact_surname), 12)
     score += min(len(compact_given), 12)
     if " " in given_names:
@@ -533,12 +537,13 @@ def _mrz_line1_score(line1: str, line2: str) -> int:
 
 
 def _select_valid_mrz(mrz_candidates):
+    """Choose the most believable pair of TD3 MRZ lines from OCR candidates."""
     best_pair = []
     best_score = -999
     for i in range(len(mrz_candidates) - 1):
         line1 = _normalize_td3_line1(mrz_candidates[i])
         line2 = mrz_candidates[i + 1]
-        if not (line1.startswith("P") or "NGA" in line1[:10] or line2[10:13] == "NGA"):
+        if not (line1.startswith("P") or infer_country_profile(line1[2:5], line2[10:13])):
             continue
         if not _looks_like_td3_line2(line2):
             continue
@@ -638,7 +643,13 @@ def _extract_visual_fields(image):
     return fields
 
 
-def extract_mrz_from_image(file_stream):
+def extract_mrz_from_image(file_stream, country_hint: str | None = None):
+    """Extract passport data from an uploaded image stream.
+
+    `country_hint` is optional because passports usually carry their country in
+    the MRZ itself. When present, it lets clients tell the API which country's
+    rules they expect to apply.
+    """
     image = get_image_from_stream(file_stream)
     if image is None:
         return {"success": False, "message": "Invalid image format."}
@@ -764,11 +775,13 @@ def extract_mrz_from_image(file_stream):
     personal_number = line2[28:42].replace("<", "")
     visual_fields = {}
 
-    if _is_probably_nigerian(country, nationality) and country != "NGA":
-        country = "NGA"
-        line1 = line1[:2] + "NGA" + line1[5:]
+    country_profile = infer_country_profile(country, nationality) or get_country_profile(country_hint)
+    normalized_country = normalize_mrz_country(country, nationality)
+    if normalized_country and normalized_country != country:
+        country = normalized_country
+        line1 = line1[:2] + normalized_country + line1[5:]
 
-    if _is_probably_nigerian(country, nationality) and (
+    if country_profile and country_profile.code == "NGA" and (
         len(surname.replace(" ", "")) < 2
         or len(given_names.replace(" ", "")) < 3
         or any(char.isdigit() for char in surname + given_names)
@@ -779,7 +792,7 @@ def extract_mrz_from_image(file_stream):
         if surname and given_names:
             line1 = _build_line1(document_type, country, surname, given_names)
 
-    if country == "NGA":
+    if country_profile and country_profile.code == "NGA":
         nin_candidate = personal_number.replace("<", "")
         if nin_candidate and not nin_candidate.isdigit():
             return with_glance(
@@ -808,6 +821,13 @@ def extract_mrz_from_image(file_stream):
             "success": True,
             "verification": {
                 "is_valid_format": True,
+                "country": {
+                    "code": country_profile.code if country_profile else country,
+                    "name": country_profile.name if country_profile else None,
+                    "profile_supported": country_profile is not None,
+                    "matched_from_mrz": country_profile is not None,
+                },
+                "is_country_passport": country_profile is not None and "P" in document_type,
                 "is_nigerian_passport": country == "NGA" and "P" in document_type,
                 "document_type": document_type,
                 "issuing_country": country,
@@ -821,7 +841,7 @@ def extract_mrz_from_image(file_stream):
                 "gender": "Male" if gender == "M" else "Female" if gender == "F" else gender,
                 "date_of_expiry": format_date(date_of_expiry),
                 "date_of_issue": visual_fields.get("date_of_issue"),
-                "nin": personal_number,
+                country_profile.passport_personal_number_label if country_profile else "personal_number": personal_number,
             },
             "mrz_raw": [line1, line2],
         }

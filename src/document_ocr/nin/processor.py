@@ -10,6 +10,7 @@ from src.core.ocr_engine import (
     get_image_from_stream,
     improve_image_quality,
 )
+from src.document_ocr.country_rules import country_validation_summary, get_country_profile
 
 
 engine = get_document_engine()
@@ -57,6 +58,7 @@ def _canonical_nin_data(raw: Optional[Dict[str, Any]]) -> Dict[str, Optional[str
 
 
 def nin_extraction_error(message: str, raw_text: str = "") -> Dict[str, Any]:
+    """Build the standard error response for the NIN endpoint."""
     return {
         "success": False,
         "message": message,
@@ -628,7 +630,29 @@ def _extraction_good_enough(merged: Dict[str, str], score: int) -> bool:
     return False
 
 
-def extract_nin_from_image(file_stream):
+def extract_nin_from_image(file_stream, country_code: str = "NGA"):
+    """Extract local ID data from an uploaded image stream.
+
+    The current parser understands Nigerian NIN cards and slips. The country
+    argument is already part of the function signature so future country-specific
+    parsers can be selected without changing the route contract.
+    """
+    country_profile = get_country_profile(country_code)
+    if country_profile is None:
+        return {
+            "success": False,
+            "message": f"Unsupported country code for NIN extraction: {country_code}",
+            "document_type": "UNKNOWN",
+            "country": {
+                "country_code": country_code,
+                "country_name": None,
+                "supported": False,
+                "checks": {},
+            },
+            "data": _canonical_nin_data(None),
+            "raw_text": "",
+        }
+
     image = get_image_from_stream(file_stream)
     if image is None:
         return {
@@ -696,6 +720,11 @@ def extract_nin_from_image(file_stream):
         "success": success,
         "message": None,
         "document_type": document_type,
+        "country": country_validation_summary(
+            country_code=country_profile.code,
+            document_type=document_type,
+            extracted_data=extracted,
+        ),
         "data": _canonical_nin_data(extracted),
         "raw_text": best_text,
     }
