@@ -34,8 +34,10 @@ document-ocr-api/
       ocr_engine.py
     document_ocr/
       bank_statement/
+      drivers_license/
       nin/
       passport/
+      voter_id/
     webhook_forwarder/
       broadcast.py
       routes.py
@@ -162,6 +164,33 @@ Form data:
 
 - `file`: PDF or image bank statement
 
+### Voter ID / Voter Card Extraction
+
+```http
+POST /api/voter-id
+POST /api/voters-card
+```
+
+Form data:
+
+- `file`: voter document image, or PDF with embedded text
+- `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
+
+`voter_id` is the canonical processor name. Country metadata keeps local naming
+clear: Nigeria exposes `VOTER_CARD`, while Ghana exposes `VOTER_ID`.
+
+### Driver's License Extraction
+
+```http
+POST /api/drivers-license
+POST /api/driver-license
+```
+
+Form data:
+
+- `file`: driver's license image, or PDF with embedded text
+- `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
+
 ### Country Metadata
 
 ```http
@@ -247,12 +276,37 @@ Current country-specific support:
 - `NGA` / Nigeria
   - Passport MRZ country-code alias correction, such as `N6A` or `NG4` to `NGA`.
   - Nigerian NIN card/slip metadata and parser support.
-  - Additional local ID metadata: voter card, driver's license, BVN, and Tax Identification Number.
+  - Voter card parser support.
+  - Driver's license parser support.
+  - Additional local ID metadata: BVN and Tax Identification Number.
   - Basic NIN format validation for exactly 11 digits.
 - `GHA` / Ghana
   - Passport MRZ country-code alias correction, such as `6HA` to `GHA`.
-  - Starter local ID metadata: Ghana Card, voter ID, driver's license, Tax Identification Number, and SSNIT number.
-  - No Ghana-specific OCR parser has been implemented yet; this profile is a template for adding one.
+  - Voter ID parser support.
+  - Driver's license parser support.
+  - Starter local ID metadata: Ghana Card, Tax Identification Number, and SSNIT number.
+
+Processor naming rule:
+
+- Use one canonical folder for the shared document family, such as `document_ocr/voter_id`.
+- Put local country names in `src/countries/<country>/rules.py`.
+- Put country-specific parsing differences in `src/countries/<country>/<document>.py`.
+
+Example:
+
+```text
+src/
+  document_ocr/
+    voter_id/
+      processor.py
+  countries/
+    nigeria/
+      voter_id.py      # Parses Nigeria Voter Card
+      rules.py         # Exposes local code VOTER_CARD
+    ghana/
+      voter_id.py      # Parses Ghana Voter ID
+      rules.py         # Exposes local code VOTER_ID
+```
 
 Example response fragment for country-aware endpoints:
 
