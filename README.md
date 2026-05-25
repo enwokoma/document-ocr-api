@@ -346,6 +346,12 @@ COUNTRY_PROFILE = CountryProfile(
 python -m pytest tests -v
 ```
 
+For local development, install the test dependencies with:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 The included tests are smoke tests for route availability and basic error behavior. Full OCR accuracy tests should use controlled sample documents.
 
 ## Security Notes
