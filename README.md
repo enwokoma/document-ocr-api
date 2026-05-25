@@ -1,121 +1,115 @@
 # Document OCR API
 
-A comprehensive, scalable Python Flask API for extracting structured data from identity documents and financial records using advanced OCR, machine learning, and image processing techniques.
+A Flask API for extracting structured data from identity documents and financial records. The project currently supports passport MRZ extraction, Nigerian NIN card/slip parsing, bank statement parsing, and an optional generic webhook forwarder.
 
-## 🎯 Overview
+The codebase is organized so new document types and country-specific rules can be added without reshaping the whole service.
 
-Document OCR API provides a robust, production-ready solution for automated document processing. It combines state-of-the-art OCR engines, intelligent validation algorithms, and quality assessment to deliver accurate, reliable data extraction from:
+## Features
 
-- **Passports**: Machine Readable Zone (MRZ) extraction with validation
-- **National ID Cards**: Nigerian NIN slips and cards (extensible to other countries)
-- **Financial Documents**: Bank statements and transaction records
-- **Webhook Integration**: Optional webhook forwarding for event-driven workflows
+- Passport MRZ extraction with TD3 validation and image-quality checks.
+- Nigerian NIN card and slip parsing with normalized response fields.
+- Bank statement summary extraction from PDFs and images.
+- Optional webhook forwarding to up to three configured targets.
+- Swagger UI at `/api-docs`.
+- HMAC request-signing utilities for production authentication.
+- OCR backend abstraction with RapidOCR first and optional EasyOCR fallback.
 
-## ✨ Features
+## Project Structure
 
-### Document Processing
-- **Passport MRZ Extraction**: Extract and validate Machine Readable Zone data from TD3 passport pages
-- **NIN Card & Slip Processing**: Extract data from Nigerian National Identification Number documents with support for both card and slip formats
-- **Bank Statement Analysis**: Extract key financial data from PDF and image-based bank statements
-- **Multi-Language Support**: OCR processing optimized for multiple document standards and languages
+```text
+document-ocr-api/
+  app.py
+  requirements.txt
+  src/
+    api/
+      routes.py
+    core/
+      auth.py
+      flash_glance.py
+      ocr_engine.py
+    document_ocr/
+      bank_statement/
+      nin/
+      passport/
+    webhook_forwarder/
+      broadcast.py
+      routes.py
+      signing.py
+  tests/
+```
 
-### Quality & Validation
-- **Image Quality Detection**: Automatic detection of glare, blur, and other image quality issues
-- **Document Type Classification**: Automatic classification of document types
-- **Data Validation**: Check-digit validation for MRZ and NIN data
-- **Liveness Detection**: Detect scanned vs. live-photography documents
+## Requirements
 
-### API Features
-- **REST API**: Clean, documented RESTful endpoints
-- **HMAC Request Signing**: Optional request authentication with HMAC-SHA256
-- **Webhook Management**: Generic webhook forwarder for event distribution
-- **Extensible Architecture**: Designed to support additional document types and countries
-- **Swagger/OpenAPI Documentation**: Interactive API documentation at `/api-docs`
+- Python 3.11 or newer
+- pip
+- RapidOCR dependencies from `requirements.txt`
 
-## 📋 Requirements
+RapidOCR is the preferred OCR backend. EasyOCR can be enabled as a fallback with `ENABLE_EASYOCR_FALLBACK=1`, but it is slower.
 
-- Python 3.11 or higher
-- pip or conda
-- 500MB+ disk space (for OCR models)
-
-### OCR Backends
-- **RapidOCR (Recommended)**: `rapidocr-onnxruntime` - Fast, accurate, low-latency
-- **EasyOCR (Fallback)**: Slower but works without additional dependencies
-
-## 🚀 Installation
-
-### 1. Clone the Repository
+## Setup
 
 ```bash
-git clone https://github.com/yourusername/document-ocr-api.git
+git clone https://github.com/YOUR_USERNAME/document-ocr-api.git
 cd document-ocr-api
-```
-
-### 2. Create Virtual Environment
-
-```bash
 python -m venv venv
-
-# On Linux/macOS:
-source venv/bin/activate
-
-# On Windows:
 venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
 ```
 
-### 3. Install Dependencies
+On Linux or macOS, activate the environment with:
 
 ```bash
-pip install -r requirements.txt
+source venv/bin/activate
 ```
 
-### 4. Configure Environment
+## Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file from `.env.example`.
 
 ```env
-# OCR API Configuration
-OCR_SECRET_KEY=your-secret-key-here
+OCR_SECRET_KEY=change-this-in-production
 
-# Webhook Forwarder Configuration (optional)
-FORWARDER_SECRET=your-webhook-forwarder-secret
+FORWARDER_SECRET=change-this-if-webhook-forwarding-is-enabled
 FORWARDER_TARGET_1_URL=https://endpoint1.example.com/webhook
 FORWARDER_TARGET_2_URL=https://endpoint2.example.com/webhook
 FORWARDER_TARGET_3_URL=https://endpoint3.example.com/webhook
 
-# Optional: Enable EasyOCR fallback
 ENABLE_EASYOCR_FALLBACK=0
 ```
 
-## ▶️ Running the API
+`FORWARDER_*` settings are only required if `/api/webhooks/forward` is used.
 
-### Development Mode
+## Running
 
 ```bash
 python app.py
 ```
 
-The API will start on `http://localhost:5005` with hot-reload enabled.
+The API runs on `http://localhost:5005`.
 
-### Production Deployment
+Swagger UI is available at:
+
+```text
+http://localhost:5005/api-docs
+```
+
+For production-style serving:
 
 ```bash
 gunicorn --bind 0.0.0.0:5005 --workers 4 --timeout 120 app:app
 ```
 
-### API Documentation
-
-Interactive API docs available at: `http://localhost:5005/api-docs`
-
-## 📚 API Endpoints
+## Endpoints
 
 ### Health Check
-```
+
+```http
 GET /
 ```
-Check API health status.
 
-**Response:**
+Returns:
+
 ```json
 {
   "status": "healthy",
@@ -125,320 +119,102 @@ Check API health status.
 
 ### Passport Extraction
 
-#### Extract Passport MRZ
-```
+```http
 POST /api/passport
-```
-
-Extract Machine Readable Zone and visual field data from a passport photograph.
-
-**Parameters:**
-- `file` (form-data, required): Passport image file (JPEG, PNG)
-- `X-Signature` (header, optional): HMAC signature for request authentication
-- `X-Timestamp` (header, optional): Unix timestamp for request authentication
-
-**Response (Success):**
-```json
-{
-  "success": true,
-  "verification": {
-    "is_valid_format": true,
-    "is_nigerian_passport": true,
-    "document_type": "P",
-    "issuing_country": "NGA"
-  },
-  "data": {
-    "surname": "DOE",
-    "given_names": "JOHN",
-    "passport_number": "A12345678",
-    "nationality": "NGA",
-    "date_of_birth": "1990-01-15",
-    "gender": "Male",
-    "date_of_expiry": "2030-01-14",
-    "date_of_issue": "2020-01-15",
-    "nin": "12345678901"
-  },
-  "mrz_raw": ["P<NGADOE<<JOHN<....", "A123456781NGA900115M3001141234567890112<<2"],
-  "flash_glance": {
-    "bright_pct": 5.2,
-    "flashy": false
-  }
-}
-```
-
-**Response (Error):**
-```json
-{
-  "success": false,
-  "message": "Passport image rejected. The upload looks like a scanned, copied, or screenshot passport page...",
-  "quality": {
-    "scan_like": {...},
-    "live_capture_context": {...}
-  }
-}
-```
-
-#### Legacy Passport Endpoint
-```
 POST /api/scan-passport
 ```
-Same as `/api/passport` - maintained for backwards compatibility.
+
+Form data:
+
+- `file`: passport image
+
+Example:
+
+```bash
+curl -X POST http://localhost:5005/api/passport ^
+  -F "file=@passport.jpg"
+```
 
 ### NIN Extraction
 
-```
+```http
 POST /api/nin
 ```
 
-Extract data from Nigerian National Identification Number (NIN) slips or cards.
+Form data:
 
-**Parameters:**
-- `file` (form-data, required): NIN document image (JPEG, PNG)
-- `X-Signature` (header, optional): HMAC signature
-- `X-Timestamp` (header, optional): Unix timestamp
-
-**Response (Success):**
-```json
-{
-  "success": true,
-  "document_type": "NIN_SLIP",
-  "data": {
-    "nin": "12345678901",
-    "tracking_id": "ABC123XYZ456",
-    "surname": "DOE",
-    "first_name": "JOHN",
-    "middle_name": "MICHAEL",
-    "other_names": null,
-    "full_name": "JOHN MICHAEL DOE",
-    "gender": "M",
-    "date_of_birth": "1990-01-15",
-    "date_issued": "2021-06-20",
-    "address": "123 Main Street, Lagos, Nigeria"
-  },
-  "raw_text": "..."
-}
-```
+- `file`: NIN card or slip image
 
 ### Bank Statement Extraction
 
-```
+```http
 POST /api/bank-statement
 ```
 
-Extract financial summary data from bank statements (PDF or image).
+Form data:
 
-**Parameters:**
-- `file` (form-data, required): Bank statement file (PDF, JPEG, PNG)
-- `X-Signature` (header, optional): HMAC signature
-- `X-Timestamp` (header, optional): Unix timestamp
+- `file`: PDF or image bank statement
 
-**Response:**
-```json
-{
-  "success": true,
-  "document_type": "BANK_STATEMENT",
-  "data": {
-    "account_number": "1234567890",
-    "account_name": "JOHN DOE",
-    "bank_name": "Example Bank",
-    "opening_balance": "10000.00",
-    "closing_balance": "15500.50",
-    "start_date": "01/01/2024",
-    "end_date": "31/01/2024"
-  }
-}
-```
+### Webhook Forwarding
 
-### Webhook Forwarding (Optional)
-
-```
+```http
 POST /api/webhooks/forward
 ```
 
-Receive a webhook payload and forward it to configured target endpoints with cryptographic signing.
+Receives a raw request body, signs it with `FORWARDER_SECRET`, and forwards it to configured targets.
 
-**Parameters:**
-- Raw JSON/form body
-- `X-Request-Id` (header, optional): Correlation ID
-- `X-Correlation-Id` (header, optional): Correlation ID
+Forwarded requests include:
 
-**Response:**
-```json
-{
-  "success": true,
-  "deduped": false,
-  "forwarded": [
-    {
-      "name": "target_1",
-      "url": "https://endpoint1.example.com/webhook",
-      "ok": true,
-      "status_code": 200,
-      "error": null,
-      "response_preview": "{...}"
-    },
-    {
-      "name": "target_2",
-      "url": "https://endpoint2.example.com/webhook",
-      "ok": false,
-      "status_code": 500,
-      "error": "Server error",
-      "response_preview": null
-    },
-    {
-      "name": "target_3",
-      "url": "",
-      "ok": false,
-      "status_code": null,
-      "error": "Missing target URL",
-      "response_preview": null
-    }
-  ]
-}
+- `X-Timestamp`
+- `X-Signature`
+- `X-Source: webhook-forwarder`
+- `Content-Type`, when provided by the original request
+- `X-Request-Id` or `X-Correlation-Id`, when provided
+
+The forwarder keeps a short in-memory dedupe cache for repeated payloads.
+
+## HMAC Authentication
+
+The request auth decorator is present in `src/core/auth.py`. It expects:
+
+```text
+X-Timestamp: current Unix timestamp
+X-Signature: HMAC_SHA256(OCR_SECRET_KEY, "{timestamp}.{path}")
 ```
 
-## 🔧 Configuration Reference
+Authentication is currently bypassed in code while OCR behavior is being developed. Re-enable it before exposing the API publicly.
 
-### Environment Variables
+## Extending The API
 
-| Variable | Type | Default | Description |
-|----------|------|---------|-------------|
-| `OCR_SECRET_KEY` | string | `dev-secret-change-in-production` | HMAC secret for request signing verification |
-| `FORWARDER_SECRET` | string | (empty) | Secret for signing forwarded webhooks |
-| `FORWARDER_TARGET_1_URL` | URL | (empty) | Primary webhook target endpoint |
-| `FORWARDER_TARGET_2_URL` | URL | (empty) | Secondary webhook target endpoint |
-| `FORWARDER_TARGET_3_URL` | URL | (empty) | Tertiary webhook target endpoint |
-| `ENABLE_EASYOCR_FALLBACK` | bool | `0` | Enable EasyOCR if RapidOCR unavailable |
+For a new document type:
 
-### Request Authentication (HMAC)
+1. Add a processor under `src/document_ocr/<document_type>/processor.py`.
+2. Keep the processor response shape consistent: `success`, `message`, `document_type`, `data`, and optional diagnostics.
+3. Add the route in `src/api/routes.py`.
+4. Add focused tests for missing files, invalid inputs, and a known-good sample.
 
-When enabled, requests require HMAC-SHA256 signatures:
+For country-specific logic:
 
-```
-Payload = "{timestamp}.{path}"
-X-Signature = HMAC_SHA256(OCR_SECRET_KEY, Payload)
-X-Timestamp = current_unix_timestamp
-```
+1. Keep shared parsing in the document processor.
+2. Add country-specific validators or normalizers in the document type package.
+3. Return country codes and validation details explicitly in the response.
 
-**Note:** Currently disabled by default (see `src/core/auth.py`).
-
-## 🏗️ Architecture
-
-### Module Structure
-
-```
-document-ocr-api/
-├── src/
-│   ├── api/                      # REST API endpoints
-│   │   └── routes.py
-│   ├── core/                     # Core utilities
-│   │   ├── auth.py              # HMAC authentication
-│   │   ├── ocr_engine.py        # OCR abstraction layer
-│   │   └── flash_glance.py      # Flash/glare detection
-│   ├── document_ocr/            # Document processors
-│   │   ├── passport/            # Passport MRZ extraction
-│   │   ├── nin/                 # NIN card/slip processing
-│   │   └── bank_statement/      # Bank statement analysis
-│   └── webhook_forwarder/       # Webhook routing (optional)
-│       ├── routes.py
-│       ├── signing.py           # Payload signing
-│       └── broadcast.py         # Multi-target forwarding
-├── app.py                       # Flask application entry point
-├── requirements.txt             # Python dependencies
-└── README.md
-```
-
-### OCR Engine
-
-The OCR engine automatically selects the best available backend:
-
-1. **RapidOCR (ONNX Runtime)** - Recommended (fastest, most accurate)
-2. **RapidOCR (Standard)** - Fallback
-3. **EasyOCR** - Slower alternative (requires `ENABLE_EASYOCR_FALLBACK=1`)
-
-## 🌍 Extensibility & Multi-Country Support
-
-The architecture is designed to support expansion to additional document types and countries:
-
-### Adding Support for New Document Types
-
-1. Create `src/document_ocr/{document_type}/processor.py`
-2. Implement extraction and validation logic
-3. Add endpoint to `src/api/routes.py`
-4. Register blueprint in `app.py`
-
-### Adding Country-Specific Validations
-
-1. Create country-specific validation module: `src/document_ocr/{document_type}/{country}.py`
-2. Implement country-specific check-digit, format, and field validation
-3. Integrate with the main processor
-
-### Planned Enhancements
-
-- [ ] Support for international passports (all countries)
-- [ ] African ID cards (Ghana, Kenya, South Africa, etc.)
-- [ ] Driver's licenses
-- [ ] Visa documents
-- [ ] Business registration documents
-- [ ] Machine learning-based field classification
-- [ ] Real-time validation against government databases (OAuth integration)
-
-## 🔐 Security Considerations
-
-- **No Data Storage**: The API processes documents in-memory only; no persistence by default
-- **HMAC Signing**: Optional request authentication prevents replay attacks
-- **Sensitive Header Redaction**: Logs redact auth headers and API keys
-- **Webhook Deduplication**: Prevents duplicate webhook processing (60-second TTL)
-- **CORS**: Configure as needed for production deployments
-- **Rate Limiting**: Implement at reverse proxy or API gateway level
-
-## 🧪 Testing
-
-Run tests for current document processors:
+## Tests
 
 ```bash
-python -m pytest tests/ -v
+python -m pytest tests -v
 ```
 
-Interactive manual testing:
+The included tests are smoke tests for route availability and basic error behavior. Full OCR accuracy tests should use controlled sample documents.
 
-```bash
-curl -X POST http://localhost:5005/api/passport \
-  -F "file=@passport.jpg" \
-  -H "X-Signature: <signature>" \
-  -H "X-Timestamp: $(date +%s)"
-```
+## Security Notes
 
-## 📊 Performance Notes
+- The API processes uploads in memory and does not persist documents by default.
+- Use a strong `OCR_SECRET_KEY` before production deployment.
+- Re-enable HMAC verification before public exposure.
+- Put rate limiting and upload-size limits at the reverse proxy or gateway layer.
+- Webhook logs redact common sensitive headers.
 
-- **Passport Extraction**: ~2-5 seconds per image (depending on OCR backend and image quality)
-- **NIN Extraction**: ~2-4 seconds per image
-- **Bank Statement Analysis**: ~3-8 seconds per PDF (3-page average)
-- **Memory Usage**: ~1-2 GB with RapidOCR loaded
-- **Concurrency**: Suitable for 10-20 concurrent requests per worker
+## License
 
-## 📝 License
-
-This project is licensed under the MIT License.
-
-See the `LICENSE` file for full details.
-
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/your-feature`
-3. Commit changes: `git commit -am 'Add your feature'`
-4. Push to branch: `git push origin feature/your-feature`
-5. Submit a Pull Request
-
-## 📧 Support & Contact
-
-For questions, issues, or feature requests, please open a GitHub issue or contact the maintainers.
-
----
-
-**Last Updated:** May 2026
-**Maintained by:** The Document OCR Team
-
-
+MIT
