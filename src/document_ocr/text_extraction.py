@@ -2,6 +2,10 @@
 
 These helpers keep upload decoding, PDF text extraction, OCR, and response
 normalization out of country-specific parsers.
+
+Call path example:
+`/api/voter-id` -> `document_ocr.voter_id.processor` ->
+`extract_text_from_upload` -> `countries.<country>.voter_id`.
 """
 
 from __future__ import annotations

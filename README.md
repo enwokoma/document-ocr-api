@@ -168,7 +168,6 @@ Form data:
 
 ```http
 POST /api/voter-id
-POST /api/voters-card
 ```
 
 Form data:
@@ -183,13 +182,23 @@ clear: Nigeria exposes `VOTER_CARD`, while Ghana exposes `VOTER_ID`.
 
 ```http
 POST /api/drivers-license
-POST /api/driver-license
 ```
 
 Form data:
 
 - `file`: driver's license image, or PDF with embedded text
 - `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
+
+For these newer identity processors, the runtime flow is:
+
+```text
+Flask route -> shared document processor -> text_extraction.py -> country parser
+```
+
+For example, `/api/voter-id` calls `src/document_ocr/voter_id/processor.py`.
+That processor calls `src/document_ocr/text_extraction.py` to convert the upload
+into text, then dispatches to `src/countries/nigeria/voter_id.py` or
+`src/countries/ghana/voter_id.py`.
 
 ### Country Metadata
 

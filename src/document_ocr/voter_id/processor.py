@@ -20,7 +20,11 @@ COUNTRY_PARSERS: Dict[str, Callable[[str], Dict[str, Any]]] = {
 
 
 def extract_voter_id_data(file_stream, *, country_code: str = "NGA", is_pdf: bool = False) -> Dict[str, Any]:
-    """Extract voter identity data for the requested country."""
+    """Extract voter identity data for the requested country.
+
+    This is where `text_extraction.py` runs: the shared processor first converts
+    the upload to text, then passes that text to the selected country parser.
+    """
     country_code = (country_code or "NGA").upper()
     parser = COUNTRY_PARSERS.get(country_code)
     if parser is None:

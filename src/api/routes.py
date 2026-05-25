@@ -159,7 +159,6 @@ def extract_statement():
 
 
 @passport_bp.route('/voter-id', methods=['POST'])
-@passport_bp.route('/voters-card', methods=['POST'])
 @verify_hmac
 def extract_voter_id():
     """
@@ -195,7 +194,6 @@ def extract_voter_id():
 
 
 @passport_bp.route('/drivers-license', methods=['POST'])
-@passport_bp.route('/driver-license', methods=['POST'])
 @verify_hmac
 def extract_drivers_license():
     """

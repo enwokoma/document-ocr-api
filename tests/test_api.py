@@ -100,13 +100,6 @@ class TestAdditionalIdentityEndpoints:
         assert data['success'] is False
         assert 'No file provided' in data['message']
 
-    def test_voters_card_alias_exists(self, client):
-        """Nigeria-friendly voters-card alias should point to the voter ID flow."""
-        response = client.post('/api/voters-card')
-        assert response.status_code == 400
-        data = json.loads(response.data)
-        assert data['success'] is False
-
     def test_drivers_license_endpoint_exists(self, client):
         """Driver's license endpoint should exist but return error without file."""
         response = client.post('/api/drivers-license')
