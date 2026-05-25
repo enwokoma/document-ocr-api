@@ -9,6 +9,8 @@ from flask import Blueprint, request, jsonify
 from src.document_ocr.passport.processor import extract_mrz_from_image
 from src.document_ocr.nin.processor import extract_nin_from_image, nin_extraction_error
 from src.document_ocr.bank_statement.processor import extract_bank_statement_data
+from src.document_ocr.drivers_license.processor import extract_drivers_license_data
+from src.document_ocr.voter_id.processor import extract_voter_id_data
 from src.core.auth import verify_hmac
 from src.countries.registry import get_country_profile, list_country_profiles, serialize_country_profile
 
@@ -156,6 +158,78 @@ def extract_statement():
         return jsonify({"success": False, "message": str(e)}), 500
 
 
+@passport_bp.route('/voter-id', methods=['POST'])
+@passport_bp.route('/voters-card', methods=['POST'])
+@verify_hmac
+def extract_voter_id():
+    """
+    Extract Voter ID / Voter Card Data
+    ---
+    tags: [Voter ID]
+    consumes: [multipart/form-data]
+    parameters:
+      - name: country
+        in: formData
+        type: string
+        required: false
+      - name: file
+        in: formData
+        type: file
+        required: true
+    responses:
+      200:
+        description: Extracted Data
+    """
+    file = get_uploaded_file()
+    if isinstance(file, tuple):
+        return file
+    try:
+        result = extract_voter_id_data(
+            file,
+            country_code=get_country_hint(default="NGA"),
+            is_pdf=is_pdf_upload(file),
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "document_type": "VOTER_ID"}), 500
+
+
+@passport_bp.route('/drivers-license', methods=['POST'])
+@passport_bp.route('/driver-license', methods=['POST'])
+@verify_hmac
+def extract_drivers_license():
+    """
+    Extract Driver's License Data
+    ---
+    tags: [Driver's License]
+    consumes: [multipart/form-data]
+    parameters:
+      - name: country
+        in: formData
+        type: string
+        required: false
+      - name: file
+        in: formData
+        type: file
+        required: true
+    responses:
+      200:
+        description: Extracted Data
+    """
+    file = get_uploaded_file()
+    if isinstance(file, tuple):
+        return file
+    try:
+        result = extract_drivers_license_data(
+            file,
+            country_code=get_country_hint(default="NGA"),
+            is_pdf=is_pdf_upload(file),
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "document_type": "DRIVERS_LICENSE"}), 500
+
+
 @passport_bp.route('/countries', methods=['GET'])
 def list_countries():
     """Return the countries and local ID types currently registered by the API."""
@@ -190,6 +264,11 @@ def get_uploaded_file():
     if file.filename == '':
         return jsonify({"success": False, "message": "Invalid filename"}), 400
     return file
+
+
+def is_pdf_upload(file) -> bool:
+    """Return True when an upload filename looks like a PDF."""
+    return file.filename.lower().endswith('.pdf')
 
 
 def get_country_hint(default=None):
