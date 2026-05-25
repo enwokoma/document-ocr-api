@@ -5,6 +5,7 @@ load_dotenv()
 from flask import Flask
 from flasgger import Swagger
 from src.api.routes import passport_bp
+from src.webhook_forwarder.routes import forwarder_bp
 
 app = Flask(__name__)
 
@@ -34,6 +35,7 @@ app.config['SWAGGER'] = {
 Swagger(app, config=swagger_config)
 
 app.register_blueprint(passport_bp, url_prefix='/api')
+app.register_blueprint(forwarder_bp, url_prefix='/api')
 
 @app.route('/')
 def health_check():
@@ -41,4 +43,6 @@ def health_check():
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5005)
+
+
 
