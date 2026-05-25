@@ -26,6 +26,7 @@ document-ocr-api/
     countries/
       profile.py
       registry.py
+      ghana/
       nigeria/
     core/
       auth.py
@@ -161,6 +162,40 @@ Form data:
 
 - `file`: PDF or image bank statement
 
+### Country Metadata
+
+```http
+GET /api/countries
+GET /api/countries/{country_code}
+```
+
+Returns registered countries and their local identity document metadata. This is
+metadata only; a listed ID does not automatically mean an OCR parser exists for
+that exact ID yet.
+
+Example:
+
+```bash
+curl http://localhost:5005/api/countries/NGA
+```
+
+Example response fragment:
+
+```json
+{
+  "success": true,
+  "country": {
+    "country_code": "NGA",
+    "country_name": "Nigeria",
+    "supported_identity_documents": [
+      {"code": "NIN_CARD", "name": "National Identification Number card"},
+      {"code": "VOTER_CARD", "name": "Permanent voter card"},
+      {"code": "DRIVERS_LICENSE", "name": "Driver's license"}
+    ]
+  }
+}
+```
+
 ### Webhook Forwarding
 
 ```http
@@ -211,8 +246,13 @@ Current country-specific support:
 
 - `NGA` / Nigeria
   - Passport MRZ country-code alias correction, such as `N6A` or `NG4` to `NGA`.
-  - Nigerian NIN card/slip support.
+  - Nigerian NIN card/slip metadata and parser support.
+  - Additional local ID metadata: voter card, driver's license, BVN, and Tax Identification Number.
   - Basic NIN format validation for exactly 11 digits.
+- `GHA` / Ghana
+  - Passport MRZ country-code alias correction, such as `6HA` to `GHA`.
+  - Starter local ID metadata: Ghana Card, voter ID, driver's license, Tax Identification Number, and SSNIT number.
+  - No Ghana-specific OCR parser has been implemented yet; this profile is a template for adding one.
 
 Example response fragment for country-aware endpoints:
 
@@ -228,6 +268,22 @@ Example response fragment for country-aware endpoints:
     }
   }
 }
+```
+
+When adding another country, keep the shape similar to `src/countries/ghana/rules.py`:
+
+```python
+from src.countries.profile import CountryProfile
+
+COUNTRY_PROFILE = CountryProfile(
+    code="ABC",
+    name="Example Country",
+    mrz_code_aliases={"ABC"},
+    supported_identity_documents={
+        "NATIONAL_ID": "National identity card",
+        "VOTER_ID": "Voter identity card",
+    },
+)
 ```
 
 ## Tests
