@@ -11,8 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.11', '3.12']
 
     steps:
     - uses: actions/checkout@v3
@@ -40,7 +41,6 @@ jobs:
     - name: Run tests with pytest
       run: |
         pytest tests/ -v --tb=short
-      continue-on-error: true
 
   build:
     runs-on: ubuntu-latest

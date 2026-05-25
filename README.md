@@ -40,7 +40,7 @@ document-ocr-api/
 
 ## Requirements
 
-- Python 3.11 or newer
+- Python 3.11 or 3.12
 - pip
 - RapidOCR dependencies from `requirements.txt`
 
