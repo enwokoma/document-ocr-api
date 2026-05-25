@@ -1,3 +1,9 @@
+"""Webhook-forwarder HTTP route.
+
+This module receives a webhook once, logs a safe preview, signs the exact raw
+payload, and sends it to configured downstream URLs.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -31,12 +37,14 @@ _DEDUPE_TTL_SECONDS = 60
 
 
 def _prune_seen(now: float) -> None:
+    """Remove old dedupe entries so the in-memory cache cannot grow forever."""
     expired = [k for k, ts in _SEEN.items() if (now - ts) > _DEDUPE_TTL_SECONDS]
     for k in expired:
         _SEEN.pop(k, None)
 
 
 def _dedupe_key(raw_body: bytes) -> str:
+    """Hash a request body so duplicate payloads can be detected cheaply."""
     return hashlib.sha256(raw_body or b"").hexdigest()
 
 
@@ -64,6 +72,7 @@ def _safe_headers_for_log() -> Dict[str, str]:
 
 
 def _safe_body_preview(raw_body: bytes, limit: int = 8192) -> str:
+    """Return a bounded text preview for logs without assuming valid UTF-8."""
     if not raw_body:
         return ""
     b = raw_body[: max(0, limit)]
@@ -71,6 +80,7 @@ def _safe_body_preview(raw_body: bytes, limit: int = 8192) -> str:
 
 
 def _forward_headers(timestamp: int, signature: str) -> Dict[str, str]:
+    """Build the headers sent to each downstream webhook target."""
     headers: Dict[str, str] = {
         "X-Timestamp": str(timestamp),
         "X-Signature": signature,

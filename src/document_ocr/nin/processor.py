@@ -1,3 +1,10 @@
+"""Nigerian NIN card and slip extraction.
+
+The parser reads text from an uploaded image, tries likely rotations, extracts
+fields by label and pattern, and returns a stable JSON shape. Country selection
+is handled through `country_rules` so future ID processors can share the route.
+"""
+
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -69,6 +76,7 @@ def nin_extraction_error(message: str, raw_text: str = "") -> Dict[str, Any]:
 
 
 def _nin_quality_error(message: str, quality: Dict[str, Any], flash_glance: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Build a standard NIN error response with image-quality diagnostics."""
     payload = nin_extraction_error(message)
     payload["quality"] = quality
     if flash_glance is not None:
@@ -77,6 +85,7 @@ def _nin_quality_error(message: str, quality: Dict[str, Any], flash_glance: Opti
 
 
 def _bright_component_stats(mask: np.ndarray) -> Dict[str, float | bool]:
+    """Measure how much of a binary mask is occupied by bright components."""
     total = int(mask.size)
     if total <= 0:
         return {
@@ -110,6 +119,7 @@ def _bright_component_stats(mask: np.ndarray) -> Dict[str, float | bool]:
 
 
 def _nin_image_quality_issue(image) -> Optional[Dict[str, Any]]:
+    """Reject images that look like scans/screenshots or contain strong glare."""
     if image is None or image.size == 0:
         return None
 
@@ -185,6 +195,7 @@ _LABEL_PATTERN = re.compile(
 
 
 def _normalize_label(label: str) -> Optional[str]:
+    """Map different printed field labels to API response keys."""
     l = re.sub(r"\s+", " ", label.strip().lower())
     if l == "tracking id":
         return "tracking_id"
@@ -238,12 +249,14 @@ _RESERVED_NAME_WORDS = {
 
 
 def _clean_value(value: str) -> str:
+    """Normalize spacing and punctuation around an OCR field value."""
     v = value.replace("\r", " ").replace("\n", " ")
     v = re.sub(r"\s+", " ", v).strip(" :;-,.|")
     return v
 
 
 def _validate_name(token: str) -> bool:
+    """Return whether a token looks like a real name rather than a label."""
     if not token:
         return False
     if not re.fullmatch(r"[A-Za-z][A-Za-z'\-]{2,29}", token):
@@ -264,6 +277,7 @@ _DATE_RES = [
 
 
 def _is_addressy(chunk: str) -> bool:
+    """Detect whether text contains common address words."""
     return any(kw in chunk.upper() for kw in (
         "STREET", "ROAD", "AVENUE", " WAY", "EXPRESS", "BUS STOP",
         "AREA", "NO ", "NO.", "BLOCK ", "FLAT ", "ESTATE", "COURT",
@@ -272,6 +286,7 @@ def _is_addressy(chunk: str) -> bool:
 
 
 def _extract_first_name_token(chunk: str, *, max_tokens: int = 6, max_chars: int = 80) -> Optional[str]:
+    """Pick the first plausible name token from a short OCR chunk."""
     if not chunk or len(chunk) > max_chars:
         return None
     cleaned = _clean_value(chunk)
@@ -290,6 +305,7 @@ def _extract_first_name_token(chunk: str, *, max_tokens: int = 6, max_chars: int
 
 
 def _extract_last_name_token(chunk: str, *, max_tokens: int = 6, max_chars: int = 80) -> Optional[str]:
+    """Pick the last plausible name token from a short OCR chunk."""
     if not chunk or len(chunk) > max_chars:
         return None
     cleaned = _clean_value(chunk)
@@ -309,6 +325,7 @@ def _extract_last_name_token(chunk: str, *, max_tokens: int = 6, max_chars: int 
 
 
 def _extract_nin(chunk: str, *, prefer: str = "first") -> Optional[str]:
+    """Extract an 11-digit Nigerian NIN from a text chunk."""
     matches = list(_NIN_RE.finditer(chunk or ""))
     if not matches:
         digits = re.sub(r"\D", "", chunk or "")
@@ -319,6 +336,7 @@ def _extract_nin(chunk: str, *, prefer: str = "first") -> Optional[str]:
 
 
 def _extract_tracking_id(chunk: str, *, prefer: str = "first") -> Optional[str]:
+    """Extract a likely alphanumeric tracking ID from a text chunk."""
     candidates: List[Tuple[int, str]] = []
     for m in _TRACKING_RE.finditer(chunk or ""):
         v = m.group(1)
@@ -333,6 +351,7 @@ def _extract_tracking_id(chunk: str, *, prefer: str = "first") -> Optional[str]:
 
 
 def _extract_gender(chunk: str, *, prefer: str = "first") -> Optional[str]:
+    """Normalize gender text to `M` or `F` when it is present."""
     matches = list(_GENDER_RE.finditer(chunk or ""))
     if not matches:
         return None
@@ -342,6 +361,7 @@ def _extract_gender(chunk: str, *, prefer: str = "first") -> Optional[str]:
 
 
 def _extract_date(chunk: str) -> Optional[str]:
+    """Extract the first date-like value from a text chunk."""
     for p in _DATE_RES:
         m = p.search(chunk or "")
         if m:
@@ -350,6 +370,7 @@ def _extract_date(chunk: str) -> Optional[str]:
 
 
 def _extract_for_field(key: str, chunk: str, *, prefer: str) -> Optional[str]:
+    """Dispatch field extraction to the correct helper for one response key."""
     if not chunk or not chunk.strip():
         return None
     if key == "nin":
@@ -435,6 +456,7 @@ def _scan_address(text: str) -> Optional[str]:
 
 
 def _detect_document_type(text: str) -> str:
+    """Classify the OCR text as a NIN slip, NIN card, or unknown document."""
     upper = text.upper()
     card_indicators = (
         "SURNAME/NOM",
@@ -476,6 +498,7 @@ _CARD_LABEL_LINE_RE = [
 
 
 def _normalize_date_string(value: str) -> str:
+    """Add missing spaces around OCR-merged date parts."""
     if not value:
         return value
     v = value.strip()
@@ -486,6 +509,7 @@ def _normalize_date_string(value: str) -> str:
 
 
 def _parse_card(text: str) -> Dict[str, str]:
+    """Extract fields from the NIN card layout."""
     result: Dict[str, str] = {}
     if not text:
         return result
@@ -561,6 +585,7 @@ def _parse_card(text: str) -> Dict[str, str]:
 
 
 def _build_full_name(data: Dict[str, str]) -> Optional[str]:
+    """Join available name fields into one display-friendly full name."""
     parts: List[str] = []
     for key in ("first_name", "middle_name", "other_names", "surname"):
         v = data.get(key)
@@ -570,6 +595,7 @@ def _build_full_name(data: Dict[str, str]) -> Optional[str]:
 
 
 def _rotate_image(image, angle: int):
+    """Rotate an image by one of the angles used during OCR fallback."""
     if angle == 0 or image is None:
         return image
     if angle == 90:
@@ -582,6 +608,7 @@ def _rotate_image(image, angle: int):
 
 
 def _ocr_text_for_image(image, enhance: bool = False) -> str:
+    """Read text from an image, optionally enhancing contrast first."""
     if image is None:
         return ""
     target = improve_image_quality(image) if enhance else image
@@ -592,6 +619,7 @@ def _ocr_text_for_image(image, enhance: bool = False) -> str:
 
 
 def _score_extraction(extracted: Dict[str, str]) -> int:
+    """Score an extraction so the best image rotation can be selected."""
     weights = {
         "nin": 5,
         "tracking_id": 3,
@@ -607,6 +635,7 @@ def _score_extraction(extracted: Dict[str, str]) -> int:
 
 
 def _post_process(extracted: Dict[str, str]) -> Dict[str, str]:
+    """Remove obvious OCR label words that slipped into name fields."""
     for key in ("surname", "first_name", "middle_name"):
         v = extracted.get(key)
         if v and v.upper() in _RESERVED_NAME_WORDS:

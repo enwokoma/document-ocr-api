@@ -1,3 +1,10 @@
+"""Request authentication helpers.
+
+The API uses an HMAC signature scheme for production request verification. The
+decorator is currently bypassed while extraction behavior is being developed;
+remove the early return inside `verify_hmac` before exposing the service.
+"""
+
 import os
 import time
 import hmac
@@ -10,8 +17,10 @@ REQUEST_EXPIRY_SECONDS = 60
 
 
 def verify_hmac(f):
+    """Decorate a Flask route with timestamped HMAC verification."""
     @wraps(f)
     def decorated(*args, **kwargs):
+        """Run the route after authentication succeeds."""
         # Temporarily disabled while OCR extraction is being debugged.
         return f(*args, **kwargs)
 

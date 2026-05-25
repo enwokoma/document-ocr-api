@@ -1,8 +1,15 @@
+"""Lightweight flash/glare estimation used by image-quality responses."""
+
 import cv2
 import numpy as np
 
 
 def flash_glance_hint(bgr: np.ndarray) -> dict | None:
+    """Return a quick brightness summary for an uploaded BGR image.
+
+    This is intentionally cheap: it downsizes large images, counts very bright
+    pixels, and reports whether the image probably has visible flash glare.
+    """
     if bgr is None or bgr.size == 0:
         return None
     h, w = bgr.shape[:2]

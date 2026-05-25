@@ -1,3 +1,10 @@
+"""Flask application entrypoint.
+
+This file creates the web server, wires route blueprints into Flask, and enables
+Swagger UI. The heavy OCR work lives under `src/document_ocr`; this file should
+stay small so startup behavior is easy to understand.
+"""
+
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -39,6 +46,7 @@ app.register_blueprint(forwarder_bp, url_prefix='/api')
 
 @app.route('/')
 def health_check():
+    """Return a small JSON response that load balancers can use as a health check."""
     return {"status": "healthy", "message": "Document OCR API is live"}, 200
 
 if __name__ == '__main__':

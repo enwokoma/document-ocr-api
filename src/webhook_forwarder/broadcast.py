@@ -1,3 +1,5 @@
+"""Send one received webhook payload to multiple configured targets."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,6 +10,8 @@ import requests
 
 @dataclass(frozen=True)
 class BroadcastResult:
+    """Result for one attempted forwarded webhook request."""
+
     name: str
     url: str
     ok: bool
@@ -48,6 +52,8 @@ def broadcast_raw_webhook(
     results: List[BroadcastResult] = []
     for name, url in targets:
         if not url:
+            # Missing targets are reported instead of raising so the response can
+            # show exactly which destinations were configured.
             results.append(
                 BroadcastResult(
                     name=name,
@@ -61,6 +67,8 @@ def broadcast_raw_webhook(
             continue
 
         try:
+            # Forward the original raw body. Re-serializing JSON could change
+            # whitespace or ordering and break downstream signature checks.
             resp = requests.post(
                 url,
                 data=raw_body,

@@ -1,3 +1,10 @@
+"""Passport MRZ extraction and validation.
+
+This module focuses on TD3 passport pages. It crops the MRZ zone, reads OCR
+candidates, validates check digits, extracts visual fields when MRZ names are
+weak, and applies country-specific rules from `country_rules`.
+"""
+
 import re
 import cv2
 import numpy as np
@@ -82,10 +89,12 @@ _FIELD_LABEL_RE = re.compile(
 
 
 def _looks_like_td3_line(line: str) -> bool:
+    """Return True when text has the basic length/character shape of TD3 MRZ."""
     return isinstance(line, str) and len(line) == 44 and bool(_TD3_ALLOWED_RE.match(line))
 
 
 def _looks_like_td3_line1(line1: str) -> bool:
+    """Validate TD3 MRZ line 1, which contains document type, country, and name."""
     if not _looks_like_td3_line(line1):
         return False
     if not re.fullmatch(r"[A-Z<]{2}", line1[0:2] or ""):
@@ -98,6 +107,7 @@ def _looks_like_td3_line1(line1: str) -> bool:
 
 
 def _looks_like_td3_line2(line2: str) -> bool:
+    """Validate TD3 MRZ line 2, which contains numbers, dates, and check digits."""
     if not _looks_like_td3_line(line2):
         return False
     if not re.fullmatch(r"[A-Z0-9<]{9}", line2[0:9] or ""):
@@ -126,12 +136,14 @@ def _looks_like_td3_line2(line2: str) -> bool:
 
 
 def _clean_mrz_line(line: str) -> str:
+    """Keep only characters that can appear in an MRZ line."""
     clean_line = (line or "").upper().replace(" ", "").strip()
     clean_line = re.sub(r"[^A-Z0-9<]", "", clean_line)
     return clean_line
 
 
 def _normalize_td3_line1(line1: str) -> str:
+    """Fix common digit/letter OCR mistakes in the name section of line 1."""
     if not line1 or len(line1) != 44:
         return line1
     chars = list(line1)
@@ -146,6 +158,7 @@ def _normalize_td3_line1(line1: str) -> str:
 
 
 def _mrz_check_digit(value: str) -> str:
+    """Calculate the ICAO MRZ check digit for a field."""
     weights = [7, 3, 1]
     total = 0
     for idx, char in enumerate(value):
@@ -162,6 +175,7 @@ def _mrz_check_digit(value: str) -> str:
 
 
 def _td3_check_digits_valid(line2: str) -> bool:
+    """Verify all TD3 line-2 check digits."""
     if not _looks_like_td3_line2(line2):
         return False
     return (
@@ -174,6 +188,7 @@ def _td3_check_digits_valid(line2: str) -> bool:
 
 
 def _glare_stats(bgr) -> dict:
+    """Measure bright low-saturation regions that often indicate glare."""
     if bgr is None or bgr.size == 0:
         return {"pct": 0.0, "max_component_pct": 0.0, "localized": False}
     hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
@@ -206,6 +221,7 @@ def _glare_stats(bgr) -> dict:
 
 
 def _scan_like_stats(bgr) -> dict:
+    """Estimate whether an image looks like a scan or screenshot."""
     if bgr is None or bgr.size == 0:
         return {
             "bright_low_saturation_pct": 0.0,
@@ -244,6 +260,7 @@ def _scan_like_stats(bgr) -> dict:
 
 
 def _live_capture_context_stats(bgr) -> dict:
+    """Look for border cues that suggest a live camera photo."""
     if bgr is None or bgr.size == 0:
         return {
             "border_saturation_mean": 0.0,
@@ -298,6 +315,7 @@ def _live_capture_context_stats(bgr) -> dict:
 
 
 def _document_quality_issue(image) -> dict | None:
+    """Return an error payload when the passport image quality is too poor."""
     h, w = image.shape[:2]
     mrz_zone = image[int(h * 0.75):h, 0:w]
     data_zone = image[int(h * 0.35):int(h * 0.95), 0:w]
@@ -349,10 +367,12 @@ def _correct_line1_country(line1: str, line2: str) -> str:
 
 
 def _clean_visual_line(line: str) -> str:
+    """Normalize visual OCR text for field-label parsing."""
     return re.sub(r"[^A-Z0-9 /-]", " ", (line or "").upper()).strip()
 
 
 def _strip_field_words(line: str) -> str:
+    """Remove label words so only likely field values remain."""
     words = [
         word
         for word in _clean_visual_line(line).split()
@@ -362,11 +382,13 @@ def _strip_field_words(line: str) -> str:
 
 
 def _line_has_field_label(line: str) -> bool:
+    """Return True when a visual OCR line appears to contain a field label."""
     words = set(_clean_visual_line(line).split())
     return bool(words & _FIELD_LABEL_WORDS) or bool(_FIELD_LABEL_RE.search(_clean_visual_line(line)))
 
 
 def _is_likely_field_value(line: str, *, letters_only: bool = True) -> bool:
+    """Check whether a visual OCR line is plausible as a field value."""
     cleaned = _strip_field_words(line)
     if not cleaned:
         return False
@@ -379,11 +401,13 @@ def _is_likely_field_value(line: str, *, letters_only: bool = True) -> bool:
 
 
 def _next_visual_value(lines, label_pattern, *, letters_only=True):
+    """Find the best value near a visual field label."""
     candidates = _visual_value_candidates(lines, label_pattern, letters_only=letters_only)
     return _best_visual_value(candidates, letters_only=letters_only)
 
 
 def _visual_value_candidates(lines, label_pattern, *, letters_only=True):
+    """Collect possible values that appear on or after a matching label line."""
     label_re = re.compile(label_pattern, re.IGNORECASE)
     candidates = []
     for idx, line in enumerate(lines):
@@ -405,6 +429,7 @@ def _visual_value_candidates(lines, label_pattern, *, letters_only=True):
 
 
 def _visual_value_score(value: str, *, letters_only: bool = True) -> int:
+    """Score a visual field candidate so noisy values can be ranked."""
     cleaned = _strip_field_words(value)
     if not cleaned:
         return -100
@@ -423,12 +448,14 @@ def _visual_value_score(value: str, *, letters_only: bool = True) -> int:
 
 
 def _best_visual_value(candidates, *, letters_only: bool = True):
+    """Return the highest-scoring visual field candidate."""
     if not candidates:
         return ""
     return max(candidates, key=lambda item: _visual_value_score(item, letters_only=letters_only))
 
 
 def _parse_visual_date(value: str):
+    """Parse printed passport dates such as `15 JAN 2025`."""
     value = _clean_visual_line(value.replace("[", "1"))
     match = re.search(
         r"\b([0-9]{1,2})\s*"
@@ -461,6 +488,7 @@ def _parse_visual_date(value: str):
 
 
 def _visual_date_score(value: str) -> int:
+    """Score a visual date candidate by how complete it looks."""
     value = _clean_visual_line(value.replace("[", "1"))
     match = re.search(r"\b([0-9]{1,2})\s*(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)", value)
     if not match:
@@ -474,10 +502,12 @@ def _visual_date_score(value: str) -> int:
 
 
 def _name_to_mrz(value: str) -> str:
+    """Convert a visual name value into MRZ-safe text."""
     return re.sub(r"[^A-Z<]", "", re.sub(r"[\s-]+", "<", (value or "").upper()))
 
 
 def _build_line1(document_type: str, country: str, surname: str, given_names: str) -> str:
+    """Rebuild TD3 line 1 after correcting names or country code."""
     doc_code = _name_to_mrz(document_type)[:2]
     if len(doc_code) < 2:
         doc_code = doc_code.ljust(2, "<")
@@ -487,6 +517,7 @@ def _build_line1(document_type: str, country: str, surname: str, given_names: st
 
 
 def _parse_names_from_line1(line1: str):
+    """Extract surname and given names from TD3 line 1."""
     names_section = line1[5:].split("<<")
     surname = names_section[0].replace("<", " ").strip() if len(names_section) > 0 else ""
     given_names = names_section[1].replace("<", " ").strip() if len(names_section) > 1 else ""
@@ -494,6 +525,7 @@ def _parse_names_from_line1(line1: str):
 
 
 def _should_prefer_visual_name(mrz_name: str, visual_name: str) -> bool:
+    """Decide whether printed visual text is better than the MRZ name text."""
     visual_clean = _strip_field_words(visual_name)
     mrz_compact = re.sub(r"[^A-Z]", "", (mrz_name or "").upper())
     visual_compact = re.sub(r"[^A-Z]", "", visual_clean.upper())
@@ -561,6 +593,7 @@ def _select_valid_mrz(mrz_candidates):
 
 
 def _mrz_candidates_from_text(text: str) -> list[str]:
+    """Convert OCR text into padded 44-character MRZ candidates."""
     mrz_candidates = []
     for line in text.split("\n"):
         clean_line = _clean_mrz_line(line)
@@ -570,6 +603,7 @@ def _mrz_candidates_from_text(text: str) -> list[str]:
 
 
 def _image_variants(image, *, mode="default"):
+    """Create image variants that may OCR better than the original."""
     image = _resize_for_ocr(image)
     if mode == "single":
         return [image]
@@ -589,6 +623,7 @@ def _image_variants(image, *, mode="default"):
 
 
 def _resize_for_ocr(image):
+    """Resize very wide images to keep OCR latency predictable."""
     h, w = image.shape[:2]
     if w <= _OCR_MAX_WIDTH:
         return image
@@ -597,6 +632,7 @@ def _resize_for_ocr(image):
 
 
 def _read_text_with_variants(image, *, mode="default"):
+    """OCR one or more image variants and merge unique text lines."""
     seen = set()
     lines = []
     for variant in _image_variants(image, mode=mode):
@@ -611,6 +647,7 @@ def _read_text_with_variants(image, *, mode="default"):
 
 
 def _extract_issue_date_from_lines(lines):
+    """Find the printed date-of-issue near issue-date labels."""
     label_re = re.compile(r"\bDATE\s*OF\s*ISSUE\b|\bDELIVRANCE\b", re.IGNORECASE)
     parsed_candidates = []
     for idx, line in enumerate(lines):
@@ -626,6 +663,7 @@ def _extract_issue_date_from_lines(lines):
 
 
 def _extract_visual_fields(image):
+    """Read printed fields from the passport data page, outside the MRZ."""
     height, width = image.shape[:2]
     data_page_crop = image[int(height * 0.40):int(height * 0.88), 0:width]
     text = _read_text_with_variants(data_page_crop, mode="single")
@@ -657,6 +695,7 @@ def extract_mrz_from_image(file_stream, country_hint: str | None = None):
     glance = flash_glance_hint(image)
 
     def with_glance(payload: dict) -> dict:
+        """Attach flash/glare summary to any response payload."""
         out = dict(payload)
         if glance is not None:
             out["flash_glance"] = glance
@@ -849,6 +888,7 @@ def extract_mrz_from_image(file_stream, country_hint: str | None = None):
 
 
 def format_date(date_string):
+    """Convert YYMMDD MRZ dates to a simple YYYY-MM-DD string."""
     if len(date_string) != 6:
         return date_string
     prefix = "19" if int(date_string[0:2]) > 40 else "20"

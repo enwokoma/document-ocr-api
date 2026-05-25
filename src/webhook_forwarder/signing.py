@@ -1,3 +1,5 @@
+"""HMAC signing for forwarded webhook payloads."""
+
 import hmac
 import hashlib
 from typing import Tuple

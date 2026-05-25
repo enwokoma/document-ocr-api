@@ -1,3 +1,10 @@
+"""HTTP routes for document extraction endpoints.
+
+Each route handles Flask-specific concerns, such as reading uploaded files and
+building HTTP responses. The actual OCR logic stays in processor modules so it
+can be tested and extended without running a web server.
+"""
+
 from flask import Blueprint, request, jsonify
 from src.document_ocr.passport.processor import extract_mrz_from_image
 from src.document_ocr.nin.processor import extract_nin_from_image, nin_extraction_error

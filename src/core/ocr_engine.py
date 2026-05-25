@@ -1,3 +1,10 @@
+"""OCR backend abstraction.
+
+Processors should not import RapidOCR or EasyOCR directly. They call this module
+so the app can choose the best installed OCR backend, reuse one engine instance,
+and return text boxes in one consistent shape.
+"""
+
 import cv2
 import numpy as np
 import re
@@ -9,22 +16,27 @@ from typing import Any, List, Optional, Sequence, Tuple, Dict
 
 @dataclass
 class OCRBox:
+    """Single OCR result with text, confidence, and optional polygon points."""
+
     text: str
     confidence: float
     box: Optional[List[List[float]]] = None
 
     @property
     def x_min(self) -> float:
+        """Left-most x coordinate, used when sorting words into reading order."""
         if self.box is None or len(self.box) == 0: return 0.0
         return min(float(p[0]) for p in self.box)
 
     @property
     def y_mid(self) -> float:
+        """Vertical midpoint, used to decide which words belong on one line."""
         if self.box is None or len(self.box) == 0: return 0.0
         return sum(float(p[1]) for p in self.box) / max(len(self.box), 1)
 
     @property
     def height(self) -> float:
+        """Approximate text-box height for line grouping tolerance."""
         if self.box is None or len(self.box) == 0: return 12.0
         ys = [float(p[1]) for p in self.box]
         return max(ys) - min(ys)
@@ -38,12 +50,14 @@ class DocumentEngine:
     """
 
     def __init__(self):
+        """Create a lazy OCR wrapper without loading any model yet."""
         self.engine = None
         self.backend = None
         self._init_attempted = False
         self._init_lock = threading.Lock()
 
     def _ensure_engine(self) -> bool:
+        """Load the first available OCR backend exactly once per process."""
         if self.engine is not None:
             return True
         if self._init_attempted:
@@ -99,9 +113,11 @@ class DocumentEngine:
                 return False
 
     def is_available(self) -> bool:
+        """Return whether at least one OCR backend can be used."""
         return self._ensure_engine()
 
     def read_text_from_image(self, image_np: Any) -> List[OCRBox]:
+        """Run OCR on an image and normalize backend-specific results."""
         if not self._ensure_engine():
             return []
 
@@ -133,6 +149,7 @@ class DocumentEngine:
         return parsed_boxes
 
     def warmup(self) -> None:
+        """Run a tiny OCR request so model initialization happens before traffic."""
         if not self._ensure_engine():
             return
         dummy = np.zeros((64, 64, 3), dtype=np.uint8)
@@ -147,6 +164,7 @@ class DocumentEngine:
             pass
 
     def group_boxes_into_lines(self, boxes: Sequence[OCRBox]) -> str:
+        """Convert OCR word boxes into newline-separated text lines."""
         if not boxes:
             return ""
 
@@ -176,16 +194,19 @@ class DocumentEngine:
         return "\n".join(lines)
 
 def get_image_from_stream(file_stream):
+    """Decode a Flask upload stream into an OpenCV BGR image."""
     file_bytes = np.frombuffer(file_stream.read(), np.uint8)
     image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
     return image
 
 def improve_image_quality(image):
+    """Improve contrast before OCR using CLAHE on the grayscale channel."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
     return cv2.cvtColor(clahe, cv2.COLOR_GRAY2BGR)
 
 def clean_text(text: str) -> str:
+    """Collapse repeated whitespace while preserving normal word spacing."""
     if not text: return ""
     return re.sub(r"[ \t\r\f\v]+", " ", text).strip()
 
