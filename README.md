@@ -28,6 +28,7 @@ document-ocr-api/
       flash_glance.py
       ocr_engine.py
     document_ocr/
+      country_rules.py
       bank_statement/
       nin/
       passport/
@@ -127,6 +128,7 @@ POST /api/scan-passport
 Form data:
 
 - `file`: passport image
+- `country` (optional): ISO-3166 alpha-3 country hint, for example `NGA`
 
 Example:
 
@@ -144,6 +146,7 @@ POST /api/nin
 Form data:
 
 - `file`: NIN card or slip image
+- `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
 
 ### Bank Statement Extraction
 
@@ -195,9 +198,33 @@ For a new document type:
 
 For country-specific logic:
 
-1. Keep shared parsing in the document processor.
-2. Add country-specific validators or normalizers in the document type package.
-3. Return country codes and validation details explicitly in the response.
+1. Add or update a `CountryProfile` in `src/document_ocr/country_rules.py`.
+2. Put country-specific aliases, supported document types, and validation helpers there.
+3. Keep shared OCR/parsing in the document processor.
+4. Return country codes and validation details explicitly in the response.
+
+Current country-specific support:
+
+- `NGA` / Nigeria
+  - Passport MRZ country-code alias correction, such as `N6A` or `NG4` to `NGA`.
+  - Nigerian NIN card/slip support.
+  - Basic NIN format validation for exactly 11 digits.
+
+Example response fragment for country-aware endpoints:
+
+```json
+{
+  "country": {
+    "country_code": "NGA",
+    "country_name": "Nigeria",
+    "supported": true,
+    "checks": {
+      "document_type_supported": true,
+      "nin_format_valid": true
+    }
+  }
+}
+```
 
 ## Tests
 
