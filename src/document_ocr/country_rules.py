@@ -1,45 +1,16 @@
-"""Country-specific document rules used by the OCR processors.
+"""Country-profile registry used by the OCR processors.
 
-The processors should stay focused on OCR and parsing. Rules that vary by
-country, such as country-code aliases or local ID validation, live here so new
-countries can be added without rewriting the passport or ID-card pipelines.
+The processors should stay focused on OCR and parsing. Country-specific logic
+lives in country folders such as `src/document_ocr/nigeria/`; this module only
+defines the shared profile shape and routes lookups to registered countries.
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from typing import Dict, Optional, Set
+from typing import Dict, Optional
 
-
-@dataclass(frozen=True)
-class CountryProfile:
-    """Configuration for one country's supported document behavior."""
-
-    code: str
-    name: str
-    mrz_code_aliases: Set[str] = field(default_factory=set)
-    supported_identity_documents: Set[str] = field(default_factory=set)
-    passport_personal_number_label: str = "personal_number"
-
-    def matches_mrz_country(self, issuing_country: str, nationality: str = "") -> bool:
-        """Return True when OCR output appears to belong to this country.
-
-        MRZ country codes can be misread by OCR. For example, `NGA` can look like
-        `N6A` or `NG4`. The alias list lets a profile correct those common cases.
-        """
-        issuing_country = (issuing_country or "").upper()
-        nationality = (nationality or "").upper()
-        return issuing_country in self.mrz_code_aliases or nationality == self.code
-
-
-NIGERIA_PROFILE = CountryProfile(
-    code="NGA",
-    name="Nigeria",
-    mrz_code_aliases={"NGA", "NGE", "NG4", "N6A", "N64", "NGR"},
-    supported_identity_documents={"NIN_CARD", "NIN_SLIP"},
-    passport_personal_number_label="nin",
-)
+from src.document_ocr.country_profile import CountryProfile
+from src.document_ocr.nigeria.rules import NIGERIA_PROFILE, validate_nin as validate_nigerian_nin
 
 COUNTRY_PROFILES: Dict[str, CountryProfile] = {
     NIGERIA_PROFILE.code: NIGERIA_PROFILE,
@@ -65,15 +36,6 @@ def normalize_mrz_country(issuing_country: str, nationality: str = "") -> str:
     """Correct a noisy MRZ country code when a profile recognizes it."""
     profile = infer_country_profile(issuing_country, nationality)
     return profile.code if profile else (issuing_country or "")
-
-
-def validate_nigerian_nin(value: Optional[str]) -> bool:
-    """Validate the basic Nigerian NIN shape.
-
-    This only checks the public format: exactly 11 digits. It does not verify the
-    number against any government database.
-    """
-    return bool(re.fullmatch(r"\d{11}", value or ""))
 
 
 def country_validation_summary(
