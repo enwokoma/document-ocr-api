@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+from src.countries.ghana.rules import GHANA_PROFILE
 from src.countries.nigeria.rules import NIGERIA_PROFILE, validate_nin as validate_nigerian_nin
 from src.countries.profile import CountryProfile
 
 COUNTRY_PROFILES: Dict[str, CountryProfile] = {
+    GHANA_PROFILE.code: GHANA_PROFILE,
     NIGERIA_PROFILE.code: NIGERIA_PROFILE,
 }
 
@@ -22,6 +24,25 @@ def get_country_profile(country_code: Optional[str]) -> Optional[CountryProfile]
     if not country_code:
         return None
     return COUNTRY_PROFILES.get(country_code.upper())
+
+
+def list_country_profiles() -> Dict[str, CountryProfile]:
+    """Return all registered country profiles keyed by country code."""
+    return dict(sorted(COUNTRY_PROFILES.items()))
+
+
+def serialize_country_profile(profile: CountryProfile) -> Dict[str, object]:
+    """Convert a country profile to simple JSON-friendly values."""
+    return {
+        "country_code": profile.code,
+        "country_name": profile.name,
+        "mrz_code_aliases": sorted(profile.mrz_code_aliases),
+        "supported_identity_documents": [
+            {"code": code, "name": name}
+            for code, name in sorted(profile.supported_identity_documents.items())
+        ],
+        "passport_personal_number_label": profile.passport_personal_number_label,
+    }
 
 
 def infer_country_profile(issuing_country: str, nationality: str = "") -> Optional[CountryProfile]:
@@ -65,5 +86,9 @@ def country_validation_summary(
         "country_code": profile.code,
         "country_name": profile.name,
         "supported": True,
+        "supported_identity_documents": [
+            {"code": code, "name": name}
+            for code, name in sorted(profile.supported_identity_documents.items())
+        ],
         "checks": checks,
     }

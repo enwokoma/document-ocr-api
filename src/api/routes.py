@@ -10,6 +10,7 @@ from src.document_ocr.passport.processor import extract_mrz_from_image
 from src.document_ocr.nin.processor import extract_nin_from_image, nin_extraction_error
 from src.document_ocr.bank_statement.processor import extract_bank_statement_data
 from src.core.auth import verify_hmac
+from src.countries.registry import get_country_profile, list_country_profiles, serialize_country_profile
 
 # The API currently groups all document routes into one blueprint. The name is
 # historical; new document routes can be added here without changing app.py.
@@ -153,6 +154,28 @@ def extract_statement():
         return jsonify(result), 200 if result.get("success") else 400
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@passport_bp.route('/countries', methods=['GET'])
+def list_countries():
+    """Return the countries and local ID types currently registered by the API."""
+    profiles = list_country_profiles()
+    return jsonify({
+        "success": True,
+        "countries": [serialize_country_profile(profile) for profile in profiles.values()],
+    }), 200
+
+
+@passport_bp.route('/countries/<country_code>', methods=['GET'])
+def get_country(country_code):
+    """Return one registered country profile by ISO-3166 alpha-3 code."""
+    profile = get_country_profile(country_code)
+    if profile is None:
+        return jsonify({
+            "success": False,
+            "message": f"Unsupported country code: {country_code.upper()}",
+        }), 404
+    return jsonify({"success": True, "country": serialize_country_profile(profile)}), 200
 
 
 def get_uploaded_file():

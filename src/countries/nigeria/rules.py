@@ -17,7 +17,14 @@ NIGERIA_PROFILE = CountryProfile(
     code="NGA",
     name="Nigeria",
     mrz_code_aliases={"NGA", "NGE", "NG4", "N6A", "N64", "NGR"},
-    supported_identity_documents={"NIN_CARD", "NIN_SLIP"},
+    supported_identity_documents={
+        "NIN_CARD": "National Identification Number card",
+        "NIN_SLIP": "National Identification Number slip",
+        "VOTER_CARD": "Permanent voter card",
+        "DRIVERS_LICENSE": "Driver's license",
+        "BVN": "Bank Verification Number",
+        "TAX_IDENTIFICATION_NUMBER": "Tax Identification Number",
+    },
     passport_personal_number_label="nin",
 )
 

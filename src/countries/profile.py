@@ -8,7 +8,7 @@ document processors.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Set
+from typing import Dict, Set
 
 
 @dataclass(frozen=True)
@@ -18,7 +18,7 @@ class CountryProfile:
     code: str
     name: str
     mrz_code_aliases: Set[str] = field(default_factory=set)
-    supported_identity_documents: Set[str] = field(default_factory=set)
+    supported_identity_documents: Dict[str, str] = field(default_factory=dict)
     passport_personal_number_label: str = "personal_number"
 
     def matches_mrz_country(self, issuing_country: str, nationality: str = "") -> bool:

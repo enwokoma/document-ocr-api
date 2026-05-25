@@ -89,6 +89,32 @@ class TestBankStatementEndpoint:
         assert 'No file provided' in data['message']
 
 
+class TestCountryEndpoints:
+    """Test country metadata discovery endpoints."""
+
+    def test_countries_endpoint_lists_registered_countries(self, client):
+        """GET /api/countries should list Nigeria and Ghana metadata."""
+        response = client.get('/api/countries')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        codes = {country['country_code'] for country in data['countries']}
+        assert {'NGA', 'GHA'}.issubset(codes)
+
+    def test_single_country_endpoint_returns_supported_ids(self, client):
+        """GET /api/countries/NGA should include local Nigerian IDs."""
+        response = client.get('/api/countries/NGA')
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        docs = {doc['code'] for doc in data['country']['supported_identity_documents']}
+        assert 'VOTER_CARD' in docs
+        assert 'DRIVERS_LICENSE' in docs
+
+    def test_single_country_endpoint_rejects_unknown_country(self, client):
+        """Unknown country codes should return 404."""
+        response = client.get('/api/countries/XYZ')
+        assert response.status_code == 404
+
+
 class TestWebhookForwarderEndpoint:
     """Test webhook forwarder endpoint."""
 
