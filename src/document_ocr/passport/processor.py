@@ -814,7 +814,8 @@ def extract_mrz_from_image(file_stream, country_hint: str | None = None):
     personal_number = line2[28:42].replace("<", "")
     visual_fields = {}
 
-    country_profile = infer_country_profile(country, nationality) or get_country_profile(country_hint)
+    country_profile_from_mrz = infer_country_profile(country, nationality)
+    country_profile = country_profile_from_mrz or get_country_profile(country_hint)
     normalized_country = normalize_mrz_country(country, nationality)
     if normalized_country and normalized_country != country:
         country = normalized_country
@@ -864,7 +865,7 @@ def extract_mrz_from_image(file_stream, country_hint: str | None = None):
                     "code": country_profile.code if country_profile else country,
                     "name": country_profile.name if country_profile else None,
                     "profile_supported": country_profile is not None,
-                    "matched_from_mrz": country_profile is not None,
+                    "matched_from_mrz": country_profile_from_mrz is not None,
                 },
                 "is_country_passport": country_profile is not None and "P" in document_type,
                 "is_nigerian_passport": country == "NGA" and "P" in document_type,
