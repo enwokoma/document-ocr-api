@@ -1,4 +1,4 @@
-﻿"""Nigeria voter card parsing rules."""
+"""Nigeria voter card parsing rules."""
 
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ def _format_name(value: str) -> str:
 def _format_joined_words(value: str) -> str:
     """Apply conservative word-boundary repairs for known PVC terms."""
     value = _clean(value)
-    for token in ("AGU", "OKA", "SAMPLE", "STREET", "LAGOS", "SOUTH"):
+    for token in ("SAMPLE", "STREET", "LAGOS", "MAINLAND", "SOUTH"):
         value = re.sub(rf"(?<!^)(?<!\s)({token})\b", rf" \1", value, flags=re.IGNORECASE)
         value = re.sub(rf"\b({token})(?!$)(?!\s|,)", rf"\1 ", value, flags=re.IGNORECASE)
     value = re.sub(r"\s+", " ", value)
