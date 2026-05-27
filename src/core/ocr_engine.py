@@ -41,6 +41,98 @@ class OCRBox:
         ys = [float(p[1]) for p in self.box]
         return max(ys) - min(ys)
 
+
+def _as_plain_sequence(value: Any) -> List[Any]:
+    """Convert RapidOCR output fields to normal lists without numpy truth checks."""
+    if value is None:
+        return []
+    if hasattr(value, "tolist"):
+        try:
+            value = value.tolist()
+        except Exception:
+            pass
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        return [value]
+    try:
+        return list(value)
+    except Exception:
+        return []
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Convert OCR confidence values without letting malformed values crash OCR."""
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _normalize_box(box: Any) -> Optional[List[List[float]]]:
+    """Normalize OCR polygon points into a JSON-friendly list of x/y pairs."""
+    if box is None:
+        return None
+    try:
+        return [[float(point[0]), float(point[1])] for point in box]
+    except Exception:
+        return None
+
+
+def _parse_rapidocr_output(output: Any) -> List[OCRBox]:
+    """
+    Normalize RapidOCR v2/v3 outputs into OCRBox objects.
+
+    RapidOCR versions differ: old wrappers can return tuple/list rows, while
+    current `rapidocr` returns an object with boxes/txts/scores. This parser
+    accepts both shapes and avoids boolean checks on numpy arrays.
+    """
+    if output is None:
+        return []
+
+    if isinstance(output, tuple) and len(output) > 0:
+        output = output[0]
+        if output is None:
+            return []
+
+    if hasattr(output, "boxes") and hasattr(output, "txts"):
+        raw_boxes = _as_plain_sequence(getattr(output, "boxes", None))
+        raw_txts = _as_plain_sequence(getattr(output, "txts", None))
+        raw_scores = _as_plain_sequence(getattr(output, "scores", None))
+        if not raw_scores and hasattr(output, "rec_scores"):
+            raw_scores = _as_plain_sequence(getattr(output, "rec_scores", None))
+
+        boxes = []
+        for idx, text in enumerate(raw_txts):
+            text_value = clean_text(str(text))
+            if not text_value:
+                continue
+            boxes.append(
+                OCRBox(
+                    text=text_value,
+                    confidence=_safe_float(raw_scores[idx] if idx < len(raw_scores) else 0.0),
+                    box=_normalize_box(raw_boxes[idx] if idx < len(raw_boxes) else None),
+                )
+            )
+        return boxes
+
+    parsed_boxes = []
+    for item in _as_plain_sequence(output):
+        if isinstance(item, dict):
+            text = item.get("text") or item.get("txt") or item.get("rec_text") or ""
+            score = item.get("confidence", item.get("score", item.get("rec_score", 0.0)))
+            box = item.get("box") or item.get("points") or item.get("dt_boxes")
+            if clean_text(str(text)):
+                parsed_boxes.append(OCRBox(text=str(text), confidence=_safe_float(score), box=_normalize_box(box)))
+        elif isinstance(item, (list, tuple)) and len(item) >= 3 and clean_text(str(item[1])):
+            parsed_boxes.append(
+                OCRBox(text=str(item[1]), confidence=_safe_float(item[2]), box=_normalize_box(item[0]))
+            )
+    return parsed_boxes
+
+
 class DocumentEngine:
     """
     Wrapper around the available OCR backend.
@@ -70,17 +162,20 @@ class DocumentEngine:
                 return False
             self._init_attempted = True
             try:
-                from rapidocr_onnxruntime import RapidOCR
+                from rapidocr import RapidOCR
                 self.engine = RapidOCR()
-                self.backend = "rapidocr_onnxruntime"
+                self.backend = "rapidocr"
                 return True
             except ImportError:
                 pass
 
             try:
-                from rapidocr import RapidOCR
+                from rapidocr_onnxruntime import RapidOCR
                 self.engine = RapidOCR()
-                self.backend = "rapidocr"
+                self.backend = "rapidocr_onnxruntime"
+                warnings.warn(
+                    "Using legacy rapidocr_onnxruntime backend. Install 'rapidocr' for the maintained backend."
+                )
                 return True
             except ImportError:
                 pass
@@ -89,7 +184,7 @@ class DocumentEngine:
                 self.engine = None
                 self.backend = None
                 warnings.warn(
-                    "RapidOCR not installed. Install 'rapidocr_onnxruntime' or 'rapidocr', or "
+                    "RapidOCR not installed. Install 'rapidocr', or "
                     "set ENABLE_EASYOCR_FALLBACK=1 to use the slower EasyOCR fallback."
                 )
                 return False
@@ -100,14 +195,14 @@ class DocumentEngine:
                 self.backend = "easyocr"
                 warnings.warn(
                     "RapidOCR not installed. Falling back to EasyOCR. "
-                    "Install 'rapidocr_onnxruntime' for the preferred backend."
+                    "Install 'rapidocr' for the preferred backend."
                 )
                 return True
             except Exception as exc:
                 self.engine = None
                 self.backend = None
                 warnings.warn(
-                    "No OCR backend available. Install 'rapidocr_onnxruntime' "
+                    "No OCR backend available. Install 'rapidocr' "
                     f"or EasyOCR. Last error: {exc}"
                 )
                 return False
@@ -123,15 +218,10 @@ class DocumentEngine:
 
         if self.backend == "rapidocr_onnxruntime":
             results, _ = self.engine(image_np, use_cls=False)
+            return _parse_rapidocr_output(results)
         elif self.backend == "rapidocr":
             output = self.engine(image_np)
-            boxes = output.boxes if output.boxes is not None else []
-            txts = output.txts if output.txts is not None else []
-            scores = output.scores if output.scores is not None else []
-            results = [
-                (box, text, score)
-                for box, text, score in zip(boxes, txts, scores)
-            ]
+            return _parse_rapidocr_output(output)
         else:
             results = self.engine.readtext(image_np, detail=1, paragraph=False)
 

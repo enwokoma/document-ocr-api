@@ -712,7 +712,7 @@ def extract_mrz_from_image(file_stream, country_hint: str | None = None):
             {
                 "success": False,
                 "message": (
-                    "OCR backend unavailable. Install Python 3.12 with rapidocr-onnxruntime, "
+                    "OCR backend unavailable. Install the maintained rapidocr package, "
                     "or set ENABLE_EASYOCR_FALLBACK=1 to use the slower EasyOCR fallback."
                 ),
                 "raw_text_detected": "",
