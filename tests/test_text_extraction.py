@@ -1,4 +1,4 @@
-﻿"""Tests for shared upload text extraction helpers."""
+"""Tests for shared upload text extraction helpers."""
 
 from src.document_ocr.text_extraction import _identity_text_score
 
@@ -9,7 +9,7 @@ def test_identity_text_score_prefers_readable_pdf_render_over_scrambled_text():
     GENDER
     SCRAMBLED SAMPLE HOLDER,
     MALE
-    SOUTH
+    SAMPLE
     0084129
     OF 0000
     ELECTORAL
@@ -28,8 +28,7 @@ def test_identity_text_score_prefers_readable_pdf_render_over_scrambled_text():
     INDEPENDENTNATIONALELECTORALCOMMISSION
     VOTER'S CARD
     CODE: 99-88-77-666 VIN:ABC1000000000000001
-    DELIM:ANAMBRALAGOSSOUTH
-    SAMPLE MAINLAND
+    DELIM:LAGOSSAMPLEMAINLANDSOUTH
     SAMPLE.HOLDERNAME
     DATEOFBIRTH GENDER
     01-02-1990 MALE

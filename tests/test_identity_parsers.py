@@ -1,4 +1,4 @@
-﻿"""Tests for country-specific voter ID and driver's license parsers."""
+"""Tests for country-specific voter ID and driver's license parsers."""
 
 from src.countries.ghana.drivers_license import parse_ghana_drivers_license
 from src.countries.ghana.voter_id import parse_ghana_voter_id
@@ -14,7 +14,7 @@ def test_nigeria_voter_card_parser_extracts_sample_fields():
     VOTER'S CARD
     CODE: 99-88-77-666
     VIN: ABC1 0000 0000 0000 000
-    DELIM: ANAMBRA | LAGOS SOUTH SAMPLE MAINLAND
+    DELIM: LAGOS | SAMPLE MAINLAND SOUTH
     SAMPLE, PERSON NAME
     DATE OF BIRTH
     01-02-1990
@@ -40,7 +40,7 @@ def test_nigeria_voter_card_parser_repairs_joined_sample_fields():
     text = """
     CODE: 99-88-77-666
     VIN: ABC1 0000 0000 0000 001
-    DELIM: ANAMBRALAGOS SOUTH SAMPLEMAINLAND
+    DELIM: LAGOSSAMPLE MAINLANDSOUTH
     SAMPLE,HOLDERNAME
     DATEOFBIRTH
     01-02-1990
@@ -56,7 +56,7 @@ def test_nigeria_voter_card_parser_repairs_joined_sample_fields():
 
     assert result["success"] is True
     assert result["data"]["vin"] == "ABC1000000000000001"
-    assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
+    assert result["data"]["delimitation"] == "LAGOS SAMPLE MAINLAND SOUTH"
     assert result["data"]["full_name"] == "SAMPLE, HOLDER NAME"
     assert result["data"]["date_of_birth"] == "01-02-1990"
     assert result["data"]["gender"] == "MALE"
@@ -70,8 +70,7 @@ def test_nigeria_voter_card_parser_handles_two_label_demographic_row():
     INDEPENDENTNATIONALELEGTORALCOMMISSION
     VOTER'SCARD
     CODE: 99-88-77-666 VIN:ABC1000000000000001
-    DELIM:ANAMBRAILAGOSSOUTH
-    SAMPLEMAINLAND
+    DELIM:LAGOSISAMPLEMAINLANDSOUTH
     SAMPLE,HOLDERNAME
     DATEOF BIRTH GENDER
     01-02-1990 MALE
@@ -86,7 +85,7 @@ def test_nigeria_voter_card_parser_handles_two_label_demographic_row():
     assert result["success"] is True
     assert result["data"]["date_of_birth"] == "01-02-1990"
     assert result["data"]["gender"] == "MALE"
-    assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
+    assert result["data"]["delimitation"] == "LAGOS SAMPLE MAINLAND SOUTH"
 
 
 def test_nigeria_voter_card_parser_handles_rendered_pdf_ocr_text():
@@ -96,8 +95,7 @@ def test_nigeria_voter_card_parser_handles_rendered_pdf_ocr_text():
     INDEPENDENTNATIONALELECTORALCOMMISSION
     VOTER'S CARD
     CODE: 99-88-77-666 VIN:ABC1000000000000001
-    A DELIM:ANAMBRALAGOSSOUTH
-    SAMPLE MAINLAND
+    A DELIM:LAGOSSAMPLEMAINLANDSOUTH
     SAMPLE.HOLDERNAME
     DATEOFBIRTH GENDER
     01-02-1990 MALE
@@ -110,7 +108,7 @@ def test_nigeria_voter_card_parser_handles_rendered_pdf_ocr_text():
     result = parse_nigeria_voter_card(text)
 
     assert result["success"] is True
-    assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
+    assert result["data"]["delimitation"] == "LAGOS SAMPLE MAINLAND SOUTH"
     assert result["data"]["full_name"] == "SAMPLE, HOLDER NAME"
     assert result["data"]["date_of_birth"] == "01-02-1990"
     assert result["data"]["gender"] == "MALE"
