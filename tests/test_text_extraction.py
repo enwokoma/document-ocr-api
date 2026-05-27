@@ -7,7 +7,7 @@ def test_identity_text_score_prefers_readable_pdf_render_over_scrambled_text():
     """Rendered OCR should beat scrambled embedded PDF text for identity PDFs."""
     scrambled_embedded_text = """
     GENDER
-    ANCNZHUTUHBKEOW NUYJ EKWU,
+    SCRAMBLED SAMPLE HOLDER,
     MALE
     SOUTH
     0084129

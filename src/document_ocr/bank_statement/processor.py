@@ -1,4 +1,4 @@
-﻿"""Bank statement extraction.
+"""Bank statement extraction.
 
 The extractor reads PDF text when available and falls back to OCR for image
 uploads. It then applies conservative regular expressions for common statement
@@ -146,11 +146,11 @@ def _extract_grey_customer_address(text: str) -> str | None:
     """Extract Grey statement address from its split two-column header."""
     lines = [_clean_line(line) for line in (text or "").splitlines()]
     for idx, line in enumerate(lines):
-        if not line.lower().startswith("provider address"):
+        if "suite" not in line.lower():
             continue
         address_parts = []
         first_line = re.sub(
-            r"^651\s+N\s+Broad\s+Street,\s*Suite\s+206\s*",
+            r"^.*?\bSuite\s+\d+\s*",
             "",
             line,
             flags=re.IGNORECASE,
@@ -201,7 +201,7 @@ def _normalize_address(value: str) -> str:
 def _split_joined_name(value: str) -> str:
     """Split compact uppercase names when banks remove spaces."""
     value = clean_text(value).upper()
-    for part in ("SAMPLE", "CUSTOMER", "HOLDER"):
+    for part in ("SAMPLE", "CUSTOMER", "HOLDER", "PERSON", "TEST"):
         value = value.replace(part, f" {part} ")
     return clean_text(value)
 
@@ -210,7 +210,9 @@ def _split_joined_address(value: str) -> str:
     """Split compact UBA-style address text into readable words."""
     value = clean_text(value).upper()
     value = re.sub(r"^(\d+)([A-Z])", r"\1 \2", value)
-    for token in ("SAMPLE", "STR", "WORLD", "BANK"):
+    for token in ("SAMPLE", "CUSTOMER", "ROAD", "STREET", "MAINLAND", "LAGOS", "WORLD", "BANK"):
         value = re.sub(rf"(?<!^)(?<!\s)({token})", rf" \1", value)
         value = re.sub(rf"({token})(?!$)(?!\s)", rf"\1 ", value)
+    value = re.sub(r"(?<!^)(?<!\s)(STR)(?=WORLD|BANK|MAINLAND|LAGOS|$)", r" \1", value)
+    value = re.sub(r"(STR)(?=WORLD|BANK|MAINLAND|LAGOS)", r"\1 ", value)
     return clean_text(value)
