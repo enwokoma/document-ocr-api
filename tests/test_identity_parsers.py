@@ -35,6 +35,34 @@ def test_nigeria_voter_card_parser_extracts_sample_fields():
     assert result["data"]["full_name"] == "SAMPLE, PERSON NAME"
 
 
+def test_nigeria_voter_card_parser_repairs_joined_sample_fields():
+    """Nigerian voter card parser should repair common OCR joins from PVC photos."""
+    text = """
+    CODE: 99-88-77-666
+    VIN: ABC1 0000 0000 0000 001
+    DELIM: ANAMBRALAGOS SOUTH SAMPLEMAINLAND
+    SAMPLE,HOLDERNAME
+    DATEOFBIRTH
+    01-02-1990
+    GENDER
+    MALE
+    OCCUPATION
+    BUSINESS
+    ADDRESS
+    4SAMPLESTREET.LAGOS
+    """
+
+    result = parse_nigeria_voter_card(text)
+
+    assert result["success"] is True
+    assert result["data"]["vin"] == "ABC1000000000000001"
+    assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
+    assert result["data"]["full_name"] == "SAMPLE, HOLDER NAME"
+    assert result["data"]["date_of_birth"] == "01-02-1990"
+    assert result["data"]["gender"] == "MALE"
+    assert result["data"]["address"] == "4 SAMPLE STREET, LAGOS"
+
+
 def test_ghana_voter_id_parser_extracts_common_fields():
     """Ghana voter ID parser should support typical label/value OCR text."""
     text = """
