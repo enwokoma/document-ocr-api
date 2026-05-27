@@ -49,7 +49,7 @@ def _extract_bank_statement_fields(text: str) -> dict:
     """Parse high-level statement fields from extracted PDF/OCR text."""
     patterns = {
         "account_number": r"(?:Account\s*(?:No|Number))\s*[:\-]?\s*([0-9xX*]{10,})",
-        "account_name": r"(?:Account\s*Name)\s*[:\-]?\s*([A-Z][A-Z\s.'\-]{3,})",
+        "account_name": r"(?:Account\s*Name)\s*[:\-]?\s*([A-Z][A-Z .'\-]{3,90})",
         "opening_balance": r"(?:Opening\s*Balance)\s*[:\-]?\s*(?:NGN|₦)?\s*(-?[\d,]+\.\d{2})",
         "closing_balance": (
             r"(?:Closing\s*Balance|Balance\s+as\s+at\s+[A-Za-z]+\s+\d{1,2},\s*\d{4})"
@@ -85,10 +85,12 @@ def _extract_bank_statement_fields(text: str) -> dict:
     if address:
         results["address"] = address
 
-    if "account_name" not in results:
-        account_name = _extract_account_name(text)
-        if account_name:
-            results["account_name"] = account_name
+    account_name = _extract_account_name(text)
+    if account_name and (
+        "account_name" not in results
+        or _looks_more_readable_name(account_name, results["account_name"])
+    ):
+        results["account_name"] = account_name
 
     return results
 
@@ -128,13 +130,24 @@ def _extract_account_name(text: str) -> str | None:
     """Extract account holder name from common statement layouts."""
     lines = [_clean_line(line) for line in (text or "").splitlines()]
     lines = [line for line in lines if line]
-    for idx, line in enumerate(lines):
-        if line.upper().replace(" ", "") == "BANKSTATEMENT" and idx + 1 < len(lines):
-            return _split_joined_name(lines[idx + 1])
     hello = re.search(r"\bHello\s+([A-Z][A-Z\s.'\-]{3,90}),", text or "", flags=re.IGNORECASE)
     if hello:
         return clean_text(hello.group(1)).upper()
+    for idx, line in enumerate(lines):
+        if line.upper().replace(" ", "") == "BANKSTATEMENT" and idx + 1 < len(lines):
+            return _split_joined_name(lines[idx + 1])
     return None
+
+
+def _looks_more_readable_name(candidate: str, current: str) -> bool:
+    """Prefer a spaced name over the compact header value when both exist."""
+    candidate = clean_text(candidate)
+    current = clean_text(current)
+    if not candidate:
+        return False
+    if " " in candidate and " " not in current:
+        return True
+    return len(candidate.split()) > len(current.split())
 
 
 def _extract_customer_address(text: str) -> str | None:
@@ -210,6 +223,7 @@ def _split_joined_address(value: str) -> str:
     """Split compact UBA-style address text into readable words."""
     value = clean_text(value).upper()
     value = re.sub(r"^(\d+)([A-Z])", r"\1 \2", value)
+    value = re.sub(r"([A-Z]{3,})(STR)(?=\b|[A-Z])", r"\1 \2", value)
     for token in ("SAMPLE", "CUSTOMER", "ROAD", "STREET", "MAINLAND", "LAGOS", "WORLD", "BANK"):
         value = re.sub(rf"(?<!^)(?<!\s)({token})", rf" \1", value)
         value = re.sub(rf"({token})(?!$)(?!\s)", rf"\1 ", value)

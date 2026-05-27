@@ -54,3 +54,23 @@ def test_uba_statement_parser_extracts_compact_address_and_period():
     assert data["start_date"] == "27-Mar-2025"
     assert data["end_date"] == "27-Mar-2026"
     assert data["closing_balance"] == "403.61"
+
+
+def test_uba_statement_parser_prefers_spaced_greeting_name():
+    """A readable greeting name should win over a compact header name."""
+    text = """
+    BankStatement
+    FIRSTNAMEMIDDLENAMELASTNAME
+    40DISTRICTSTRSAMPLECITY
+    27-Mar-2025to27-Mar-2026
+    Account Name FIRSTNAMEMIDDLENAMELASTNAME
+    Hello FIRSTNAME MIDDLENAME LASTNAME,
+    Account Number 0001112223
+    Opening Balance: 313.70
+    Closing Balance: 403.61
+    """
+
+    data = _extract_bank_statement_fields(text)
+
+    assert data["account_name"] == "FIRSTNAME MIDDLENAME LASTNAME"
+    assert data["address"] == "40 DISTRICT STR SAMPLE CITY"
