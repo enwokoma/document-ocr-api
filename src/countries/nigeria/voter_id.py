@@ -48,17 +48,12 @@ _NIGERIAN_STATES = (
 )
 
 _KNOWN_NAME_TOKENS = (
+    "CARD",
     "HOLDER",
-    "CHUKWU",
-    "CHUKWUDI",
-    "CHUKWUEMEKA",
-    "SAMPLE",
-    "SAMPLE",
-    "JOHN",
-    "JOHNPAUL",
     "NAME",
     "PERSON",
     "SAMPLE",
+    "TEST",
 )
 
 

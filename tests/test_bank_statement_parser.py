@@ -1,4 +1,4 @@
-﻿"""Tests for bank statement field extraction."""
+"""Tests for bank statement field extraction."""
 
 from src.document_ocr.bank_statement.processor import _extract_bank_statement_fields
 
@@ -10,7 +10,7 @@ def test_grey_statement_parser_extracts_customer_address_and_header_fields():
     Grey Inc. Sample Customer
     Provider Address, Suite 000 12, Sample Avenue, by Sample Landmark
     Middletown, DE 19700 USA. Sample District
-    GRA
+    SAMPLE CITY
     TIME PERIOD: ACCOUNT NUMBER BANK NAME
     01/08/2025 → 18/11/2025 0001112223 Wema Bank
     CURRENCY
@@ -24,7 +24,7 @@ def test_grey_statement_parser_extracts_customer_address_and_header_fields():
 
     assert data["account_number"] == "0001112223"
     assert data["bank_name"] == "Wema Bank"
-    assert data["address"] == "12, Sample Avenue, by Sample Landmark Sample District GRA"
+    assert data["address"] == "12, Sample Avenue, by Sample Landmark Sample District SAMPLE CITY"
     assert data["start_date"] == "01/08/2025"
     assert data["end_date"] == "18/11/2025"
     assert data["closing_balance"] == "38.60"
