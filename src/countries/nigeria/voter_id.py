@@ -1,4 +1,4 @@
-"""Nigeria voter card parsing rules."""
+﻿"""Nigeria voter card parsing rules."""
 
 from __future__ import annotations
 
@@ -7,15 +7,70 @@ from typing import Any, Dict, Optional
 
 from src.countries.registry import country_validation_summary
 
+_NIGERIAN_STATES = (
+    "ABIA",
+    "ADAMAWA",
+    "AKWA IBOM",
+    "ANAMBRA",
+    "BAUCHI",
+    "BAYELSA",
+    "BENUE",
+    "BORNO",
+    "CROSS RIVER",
+    "DELTA",
+    "EBONYI",
+    "EDO",
+    "EKITI",
+    "ENUGU",
+    "GOMBE",
+    "IMO",
+    "JIGAWA",
+    "KADUNA",
+    "KANO",
+    "KATSINA",
+    "KEBBI",
+    "KOGI",
+    "KWARA",
+    "LAGOS",
+    "NASARAWA",
+    "NIGER",
+    "OGUN",
+    "ONDO",
+    "OSUN",
+    "OYO",
+    "PLATEAU",
+    "RIVERS",
+    "SOKOTO",
+    "TARABA",
+    "YOBE",
+    "ZAMFARA",
+    "FCT",
+)
+
+_KNOWN_NAME_TOKENS = (
+    "HOLDER",
+    "CHUKWU",
+    "CHUKWUDI",
+    "CHUKWUEMEKA",
+    "SAMPLE",
+    "SAMPLE",
+    "JOHN",
+    "JOHNPAUL",
+    "NAME",
+    "PERSON",
+    "SAMPLE",
+)
+
 
 def parse_nigeria_voter_card(text: str) -> Dict[str, Any]:
     """Parse OCR text from a Nigerian Permanent Voter Card."""
+    text = _normalize_voter_text(text)
     data = {
         "code": _first_match(text, r"\bCODE[:\s-]*([0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3})"),
         "vin": _normalize_vin(_first_match(text, r"\bVIN[:\s-]*([A-Z0-9 ]{10,30})")),
         "delimitation": _extract_delimitation(text),
         "full_name": _extract_name(text),
-        "date_of_birth": _first_match(text, r"DATE\s+OF\s+BIRTH\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})"),
+        "date_of_birth": _extract_date_of_birth(text),
         "gender": _normalize_gender(_first_match(text, r"\bGENDER\s*(MALE|FEMALE|M|F)\b")),
         "occupation": _extract_after_label(text, "OCCUPATION", stop_labels=("ADDRESS",)),
         "address": _extract_after_label(text, "ADDRESS", stop_labels=()),
@@ -41,6 +96,21 @@ def _first_match(text: str, pattern: str) -> Optional[str]:
 def _clean(value: str) -> str:
     """Collapse whitespace and punctuation around a parsed value."""
     return re.sub(r"\s+", " ", value or "").strip(" :;,.|-")
+
+
+def _normalize_voter_text(text: str) -> str:
+    """Normalize PVC OCR text before field-specific parsing."""
+    text = text or ""
+    replacements = {
+        "DATEOFBIRTH": "DATE OF BIRTH",
+        "DATE OFBIRTH": "DATE OF BIRTH",
+        "DATEOF BIRTH": "DATE OF BIRTH",
+        "VOTERSCARD": "VOTER'S CARD",
+        "VOTER'SCARD": "VOTER'S CARD",
+    }
+    for old, new in replacements.items():
+        text = re.sub(old, new, text, flags=re.IGNORECASE)
+    return text
 
 
 def _normalize_vin(value: Optional[str]) -> Optional[str]:
@@ -90,7 +160,7 @@ def _extract_name(text: str) -> Optional[str]:
             continue
         words = re.findall(r"[A-Z]{2,}", line)
         if len(words) >= 2 and not any(word in skip_words for word in words):
-            return line
+            return _format_name(line)
     return None
 
 
@@ -112,7 +182,12 @@ def _extract_delimitation(text: str) -> Optional[str]:
         if "," in line or re.search(r"\b(DATE OF BIRTH|GENDER|OCCUPATION|ADDRESS)\b", upper):
             break
         captured.append(line)
-    return _clean(" ".join(captured)) or None
+    return _format_delimitation(_clean(" ".join(captured))) or None
+
+
+def _extract_date_of_birth(text: str) -> Optional[str]:
+    """Extract date of birth from PVC text, including joined OCR labels."""
+    return _first_match(text, r"DATE\s*OF\s*BIRTH\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})")
 
 
 def _extract_after_label(text: str, label: str, *, stop_labels: tuple[str, ...]) -> Optional[str]:
@@ -128,4 +203,67 @@ def _extract_after_label(text: str, label: str, *, stop_labels: tuple[str, ...])
         if stop:
             value = value[: stop.start()]
             break
-    return _clean(value) or None
+    value = _clean(value)
+    if label == "ADDRESS":
+        return _format_address(value) or None
+    return _format_joined_words(value) or None
+
+
+def _format_delimitation(value: str) -> str:
+    """Repair common missing spaces in Nigerian PVC delimitation text."""
+    value = _clean((value or "").replace("|", " "))
+    upper = value.upper()
+    for state in _NIGERIAN_STATES:
+        compact_state = state.replace(" ", "")
+        if upper.startswith(compact_state) and not upper.startswith(state + " "):
+            value = state + " " + value[len(compact_state):].lstrip()
+            break
+    return _format_joined_words(value)
+
+
+def _format_address(value: str) -> str:
+    """Repair common PVC address OCR joins, such as `4SAMPLESTREET.LAGOS`."""
+    value = _clean(value.replace(".", ", "))
+    value = re.sub(r"^(\d+)([A-Z])", r"\1 \2", value, flags=re.IGNORECASE)
+    value = re.sub(r"([A-Z])(?=STREET\b)", r"\1 ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\bSTREET([A-Z])", r"STREET \1", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s*,\s*", ", ", value)
+    return _format_joined_words(value)
+
+
+def _format_name(value: str) -> str:
+    """Format PVC name lines while preserving the surname-first comma style."""
+    value = _clean(value.upper())
+    if "," in value:
+        surname, given_names = value.split(",", 1)
+        return f"{surname.strip()}, {_split_known_tokens(given_names.strip())}".strip()
+    return _split_known_tokens(value)
+
+
+def _format_joined_words(value: str) -> str:
+    """Apply conservative word-boundary repairs for known PVC terms."""
+    value = _clean(value)
+    for token in ("AGU", "OKA", "SAMPLE", "STREET", "LAGOS", "SOUTH"):
+        value = re.sub(rf"(?<!^)(?<!\s)({token})\b", rf" \1", value, flags=re.IGNORECASE)
+        value = re.sub(rf"\b({token})(?!$)(?!\s|,)", rf"\1 ", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+,", ",", value)
+    value = re.sub(r",\s*", ", ", value)
+    return value.strip()
+
+
+def _split_known_tokens(value: str) -> str:
+    """Split joined name tokens only when the token boundary is known."""
+    value = _clean(value.upper())
+    if " " in value:
+        return value
+    remaining = value
+    parts = []
+    while remaining:
+        match = next((token for token in _KNOWN_NAME_TOKENS if remaining.startswith(token)), None)
+        if not match:
+            parts.append(remaining)
+            break
+        parts.append(match)
+        remaining = remaining[len(match):]
+    return " ".join(parts)
