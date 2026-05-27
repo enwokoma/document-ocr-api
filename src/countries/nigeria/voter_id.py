@@ -71,7 +71,7 @@ def parse_nigeria_voter_card(text: str) -> Dict[str, Any]:
         "delimitation": _extract_delimitation(text),
         "full_name": _extract_name(text),
         "date_of_birth": _extract_date_of_birth(text),
-        "gender": _normalize_gender(_first_match(text, r"\bGENDER\s*(MALE|FEMALE|M|F)\b")),
+        "gender": _extract_gender(text),
         "occupation": _extract_after_label(text, "OCCUPATION", stop_labels=("ADDRESS",)),
         "address": _extract_after_label(text, "ADDRESS", stop_labels=()),
     }
@@ -187,7 +187,26 @@ def _extract_delimitation(text: str) -> Optional[str]:
 
 def _extract_date_of_birth(text: str) -> Optional[str]:
     """Extract date of birth from PVC text, including joined OCR labels."""
-    return _first_match(text, r"DATE\s*OF\s*BIRTH\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})")
+    date = _first_match(
+        text,
+        r"DATE\s*OF\s*BIRTH(?:\s+GENDER)?\s*([0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4})",
+    )
+    if date:
+        return date
+
+    compact_date = _first_match(text, r"DATE\s*OF\s*BIRTH(?:\s+GENDER)?\s*([0-9]{8})")
+    if compact_date:
+        return f"{compact_date[0:2]}-{compact_date[2:4]}-{compact_date[4:8]}"
+    return None
+
+
+def _extract_gender(text: str) -> Optional[str]:
+    """Extract gender even when PVC OCR joins DOB and gender into two rows."""
+    gender = _first_match(
+        text,
+        r"\bGENDER\s*(?:[0-9]{1,2}[-/][0-9]{1,2}[-/][0-9]{2,4}\s*)?(MALE|FEMALE|M|F)\b",
+    )
+    return _normalize_gender(gender)
 
 
 def _extract_after_label(text: str, label: str, *, stop_labels: tuple[str, ...]) -> Optional[str]:
@@ -216,7 +235,10 @@ def _format_delimitation(value: str) -> str:
     for state in _NIGERIAN_STATES:
         compact_state = state.replace(" ", "")
         if upper.startswith(compact_state) and not upper.startswith(state + " "):
-            value = state + " " + value[len(compact_state):].lstrip()
+            rest = value[len(compact_state):].lstrip()
+            if rest.upper().startswith("I"):
+                rest = rest[1:].lstrip()
+            value = state + " " + rest
             break
     return _format_joined_words(value)
 
