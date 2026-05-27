@@ -11,6 +11,7 @@ numpy>=2.1.0; python_version >= "3.14"
 python-dotenv
 rapidocr>=3.8.1
 pdfplumber>=0.10.4
+pypdfium2>=4.30.0
 pytesseract==0.3.10
 mrz==0.6.2
 requests

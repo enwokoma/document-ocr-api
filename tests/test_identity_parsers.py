@@ -89,6 +89,33 @@ def test_nigeria_voter_card_parser_handles_two_label_demographic_row():
     assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
 
 
+def test_nigeria_voter_card_parser_handles_rendered_pdf_ocr_text():
+    """Nigerian voter card parser should handle OCR text from rotated PDF rendering."""
+    text = """
+    FEDERAL REPUBLICOF NIGERIA
+    INDEPENDENTNATIONALELECTORALCOMMISSION
+    VOTER'S CARD
+    CODE: 99-88-77-666 VIN:ABC1000000000000001
+    A DELIM:ANAMBRALAGOSSOUTH
+    SAMPLE MAINLAND
+    SAMPLE.HOLDERNAME
+    DATEOFBIRTH GENDER
+    01-02-1990 MALE
+    OCCUPATION
+    BUSINESS
+    ADDRESS
+    4SAMPLESTREET.LAGOS
+    """
+
+    result = parse_nigeria_voter_card(text)
+
+    assert result["success"] is True
+    assert result["data"]["delimitation"] == "ANAMBRA LAGOS SOUTH SAMPLE MAINLAND"
+    assert result["data"]["full_name"] == "SAMPLE, HOLDER NAME"
+    assert result["data"]["date_of_birth"] == "01-02-1990"
+    assert result["data"]["gender"] == "MALE"
+
+
 def test_ghana_voter_id_parser_extracts_common_fields():
     """Ghana voter ID parser should support typical label/value OCR text."""
     text = """

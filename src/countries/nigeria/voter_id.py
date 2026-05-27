@@ -156,6 +156,8 @@ def _extract_name(text: str) -> Optional[str]:
         "ADDRESS",
     }
     for line in lines:
+        if "," not in line and "." in line:
+            line = re.sub(r"^([A-Z]{2,})\.([A-Z]{2,})$", r"\1,\2", line)
         if "," not in line:
             continue
         words = re.findall(r"[A-Z]{2,}", line)
@@ -179,7 +181,11 @@ def _extract_delimitation(text: str) -> Optional[str]:
             continue
         if not collecting:
             continue
-        if "," in line or re.search(r"\b(DATE OF BIRTH|GENDER|OCCUPATION|ADDRESS)\b", upper):
+        if (
+            "," in line
+            or re.search(r"^[A-Z]{2,}\.[A-Z]{2,}$", upper)
+            or re.search(r"\b(DATE OF BIRTH|GENDER|OCCUPATION|ADDRESS)\b", upper)
+        ):
             break
         captured.append(line)
     return _format_delimitation(_clean(" ".join(captured))) or None
