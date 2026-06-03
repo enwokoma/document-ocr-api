@@ -1,6 +1,6 @@
 # Document OCR API
 
-A Flask API for extracting structured data from identity documents and financial records. The project currently supports passport MRZ extraction, Nigerian NIN card/slip parsing, bank statement parsing, and an optional generic webhook forwarder.
+A Flask API for extracting structured data from identity documents, financial records, and utility proof-of-address documents. The project currently supports passport MRZ extraction, Nigerian NIN card/slip parsing, bank statement parsing, utility bill/receipt parsing, and an optional generic webhook forwarder.
 
 The codebase is organized so new document types and country-specific rules can be added without reshaping the whole service.
 
@@ -9,6 +9,7 @@ The codebase is organized so new document types and country-specific rules can b
 - Passport MRZ extraction with TD3 validation and image-quality checks.
 - Nigerian NIN card and slip parsing with normalized response fields.
 - Bank statement summary extraction from PDFs and images.
+- Utility bill and payment receipt extraction with address, receipt date, and month-age calculation.
 - Optional webhook forwarding to up to three configured targets.
 - Swagger UI at `/api-docs`.
 - HMAC request-signing utilities for production authentication.
@@ -37,6 +38,7 @@ document-ocr-api/
       drivers_license/
       nin/
       passport/
+      utility_bill/
       voter_id/
     webhook_forwarder/
       broadcast.py
@@ -163,6 +165,31 @@ POST /api/bank-statement
 Form data:
 
 - `file`: PDF or image bank statement
+
+### Utility Bill / Receipt Extraction
+
+```http
+POST /api/utility-bill
+```
+
+Form data:
+
+- `file`: utility bill or utility payment receipt image/PDF
+- `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
+
+The utility bill response focuses on proof-of-address checks. It returns the
+service address, receipt/bill date, `days_old`, `months_old`, and an `is_recent`
+flag based on a 90-day freshness window. Older receipts can still return
+`success: true` when the address and date are readable; consumers can decide how
+to enforce freshness from `is_recent`.
+
+Example:
+
+```bash
+curl -X POST http://localhost:5005/api/utility-bill ^
+  -F "file=@utility_receipt.jpg" ^
+  -F "country=NGA"
+```
 
 ### Voter ID / Voter Card Extraction
 
