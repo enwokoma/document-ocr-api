@@ -89,6 +89,18 @@ class TestBankStatementEndpoint:
         assert 'No file provided' in data['message']
 
 
+class TestUtilityBillEndpoint:
+    """Test utility bill processing endpoint."""
+
+    def test_utility_bill_endpoint_exists(self, client):
+        """Utility bill endpoint should exist but return error without file."""
+        response = client.post('/api/utility-bill')
+        assert response.status_code == 400
+        data = json.loads(response.data)
+        assert data['success'] is False
+        assert 'No file provided' in data['message']
+
+
 class TestAdditionalIdentityEndpoints:
     """Test additional identity document endpoints."""
 
