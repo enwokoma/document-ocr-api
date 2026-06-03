@@ -11,6 +11,7 @@ from src.document_ocr.nin.processor import extract_nin_from_image, nin_extractio
 from src.document_ocr.bank_statement.processor import extract_bank_statement_data
 from src.document_ocr.drivers_license.processor import extract_drivers_license_data
 from src.document_ocr.voter_id.processor import extract_voter_id_data
+from src.document_ocr.utility_bill.processor import extract_utility_bill_data
 from src.core.auth import verify_hmac
 from src.countries.registry import get_country_profile, list_country_profiles, serialize_country_profile
 
@@ -156,6 +157,41 @@ def extract_statement():
         return jsonify(result), 200 if result.get("success") else 400
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@passport_bp.route('/utility-bill', methods=['POST'])
+@verify_hmac
+def extract_utility_bill():
+    """
+    Extract Utility Bill / Receipt Data
+    ---
+    tags: [Utility Bill]
+    consumes: [multipart/form-data]
+    parameters:
+      - name: country
+        in: formData
+        type: string
+        required: false
+      - name: file
+        in: formData
+        type: file
+        required: true
+    responses:
+      200:
+        description: Extracted Data
+    """
+    file = get_uploaded_file()
+    if isinstance(file, tuple):
+        return file
+    try:
+        result = extract_utility_bill_data(
+            file,
+            country_code=get_country_hint(default="NGA"),
+            is_pdf=is_pdf_upload(file),
+        )
+        return jsonify(result), 200 if result.get("success") else 400
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e), "document_type": "UTILITY_BILL"}), 500
 
 
 @passport_bp.route('/voter-id', methods=['POST'])
