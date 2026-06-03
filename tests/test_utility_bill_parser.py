@@ -81,3 +81,23 @@ def test_utility_receipt_parser_handles_compact_ocr_dates():
     assert data["document_date"] == "2026-04-21"
     assert data["months_old"] == 1
     assert data["days_old"] == 43
+
+
+def test_utility_receipt_parser_repairs_compact_ocr_values():
+    """Compacted OCR names, addresses, and labels should be made readable."""
+    text = """
+    Provider AbujaElectricityDistributionPrepaid
+    Customer Name EdwardSampleHolder
+    ServiceAddressPLT 75SAMPLESTREET
+    SAMPLECITY
+    Transaction No. 250815090100472733509495
+    Transaction Date Aug15th,202521:00:52
+    """
+
+    parsed = parse_utility_bill_text(text, today=date(2026, 6, 3))
+    data = parsed.data
+
+    assert data["customer_name"] == "EDWARD SAMPLE HOLDER"
+    assert data["service_address"] == "PLT 75 SAMPLE STREET SAMPLECITY"
+    assert data["provider"] == "Abuja Electricity Distribution Prepaid"
+    assert data["transaction_reference"] == "250815090100472733509495"

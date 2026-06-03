@@ -104,7 +104,7 @@ _LABELS = {
     "meter_number": ("meter number", "meter no", "beneficiary id"),
     "meter_type": ("meter type", "purchase type"),
     "token": ("meter token", "token"),
-    "transaction_reference": ("transaction reference", "transaction no", "transaction id", "receipt number", "transaction d"),
+    "transaction_reference": ("transaction reference", "transaction no", "transaction id", "receipt number"),
     "units_purchased_kwh": ("units purchased", "unit", "units"),
     "amount_paid": ("amount paid", "amount", "total amount paid", "payment amount"),
     "document_date": ("transaction date", "payment date", "receipt date", "vending date", "date"),
@@ -160,6 +160,7 @@ def parse_utility_bill_text(text: str, *, country_code: str = "NGA", today: Opti
     _apply_fallbacks(data, normalized_text, lines)
     _normalize_provider_fields(data, normalized_text)
     _normalize_amount_and_units(data)
+    _normalize_readable_text_fields(data)
     _apply_date_age(data, today=today)
     data["confidence"] = _score_confidence(data)
 
@@ -222,10 +223,12 @@ def _collect_label_values(lines: Iterable[str]) -> Dict[str, str]:
         key, value = _split_label_value(line)
         if not key:
             continue
+        continuation_start = idx + 1
         if not value and idx + 1 < len(items) and not _split_label_value(items[idx + 1])[0]:
             value = items[idx + 1]
-            if key == "service_address" and idx + 2 < len(items) and not _split_label_value(items[idx + 2])[0]:
-                value = f"{value} {items[idx + 2]}"
+            continuation_start = idx + 2
+        if key in {"customer_name", "service_address"}:
+            value = _append_continuation_lines(value or "", items, continuation_start)
         if value:
             values.setdefault(key, value)
     return values
@@ -234,14 +237,42 @@ def _collect_label_values(lines: Iterable[str]) -> Dict[str, str]:
 def _split_label_value(line: str) -> tuple[Optional[str], Optional[str]]:
     """Return the canonical key and value when a line begins with a known label."""
     compact_line = clean_text(line)
-    label_source = compact_line.lower().replace(".", "")
     for key, labels in _LABELS.items():
         for label in labels:
-            if not label_source.startswith(label):
+            label_pattern = r"\s*".join(re.escape(part) for part in label.split())
+            match = re.match(rf"^\s*{label_pattern}\.?\s*[:\-]?\s*(.*)$", compact_line, flags=re.IGNORECASE)
+            if not match:
                 continue
-            value = compact_line[len(label):].strip(" :-")
+            value = match.group(1).strip(" :-")
             return key, value or None
     return None, None
+
+
+def _append_continuation_lines(value: str, lines: list[str], start_index: int) -> str:
+    """Append nearby value lines for wrapped names and addresses."""
+    parts = [value] if value else []
+    for idx in range(start_index, min(start_index + 2, len(lines))):
+        next_key, _ = _split_label_value(lines[idx])
+        if next_key:
+            break
+        if _looks_like_non_value_line(lines[idx]):
+            break
+        parts.append(lines[idx])
+    return clean_text(" ".join(parts))
+
+
+def _looks_like_non_value_line(line: str) -> bool:
+    """Filter obvious buttons, captions, and legal/footer copy."""
+    upper = (line or "").upper()
+    return any(
+        marker in upper
+        for marker in (
+            "REPORT ISSUE",
+            "SHARE RECEIPT",
+            "ENJOY A BETTER LIFE",
+            "GET FREE TRANSFERS",
+        )
+    )
 
 
 def _apply_label_values(data: Dict[str, Any], values: Dict[str, str]) -> None:
@@ -252,8 +283,10 @@ def _apply_label_values(data: Dict[str, Any], values: Dict[str, str]) -> None:
             if iso:
                 data["document_date"] = iso
                 data["document_date_label"] = "transaction_date"
+        elif key == "service_address":
+            data[key] = _clean_address(value)
         else:
-            data[key] = clean_text(value).upper() if key in {"customer_name", "service_address"} else clean_text(value)
+            data[key] = clean_text(value)
 
 
 def _apply_fallbacks(data: Dict[str, Any], text: str, lines: list[str]) -> None:
@@ -327,9 +360,54 @@ def _join_address_lines(candidates: Iterable[str]) -> Optional[str]:
 def _clean_address(value: str) -> str:
     """Normalize a utility receipt address without changing its wording."""
     value = clean_text(value).upper()
+    value = value.replace("\uff0c", ",")
+    value = re.sub(r"\.{2,}", " ", value)
+    value = re.sub(r"\b(PLT|PLOT)(\d+)", r"\1 \2", value)
+    value = re.sub(r"(\d)([A-Z])", r"\1 \2", value)
+    value = re.sub(r"^([A-Z]+)\s+(PLT|PLOT)\s+(\d+)\s+(.+)$", r"\2 \3 \4 \1", value)
+    value = _split_known_address_tokens(value)
     value = re.sub(r"\s*,\s*", ", ", value)
+    value = re.sub(r"(,\s*){2,}", ", ", value)
     value = re.sub(r"\s+", " ", value)
     return value.strip(" ,")
+
+
+def _split_known_address_tokens(value: str) -> str:
+    """Repair common OCR joins in Nigerian utility receipt addresses."""
+    tokens = (
+        "JUBILATION",
+        "BETHEL",
+        "ESTATE",
+        "STREET",
+        "ROAD",
+        "AVENUE",
+        "CLOSE",
+        "CADASTRAL",
+        "ZONE",
+        "AIRPRT",
+        "AIRPORT",
+        "LUGBE",
+        "LOKOGOMA",
+        "LOKOGO",
+        "MEIRAN",
+        "LAGOS",
+        "ABUJA",
+        "KUBWA",
+        "NEAR",
+        "WAHEED",
+        "AJIBIKE",
+        "MARYKAY",
+        "HOTEL",
+        "FO1",
+    )
+    for token in tokens:
+        if token == "LOKOGO":
+            value = re.sub(r"(?<!^)(?<![\s,/])(LOKOGO)(?!MA)", r" \1", value)
+            value = re.sub(r"(LOKOGO)(?!MA)(?!$)(?![\s,.])", r"\1 ", value)
+            continue
+        value = re.sub(rf"(?<!^)(?<![\s,/])({token})", rf" \1", value)
+        value = re.sub(rf"({token})(?!$)(?![\s,.])", rf"\1 ", value)
+    return value
 
 
 def _normalize_provider_fields(data: Dict[str, Any], text: str) -> None:
@@ -383,6 +461,75 @@ def _normalize_amount_and_units(data: Dict[str, Any]) -> None:
         data["meter_number"] = re.sub(r"[^A-Z0-9]", "", str(data["meter_number"]).upper())
     if data.get("token"):
         data["token"] = re.sub(r"\s+", "-", str(data["token"]).replace("_", "-")).strip("-")
+
+
+def _normalize_readable_text_fields(data: Dict[str, Any]) -> None:
+    """Repair OCR-compacted display fields that should contain words."""
+    if data.get("customer_name"):
+        data["customer_name"] = _format_customer_name(str(data["customer_name"]))
+    if data.get("service_address"):
+        data["service_address"] = _clean_address(str(data["service_address"]))
+    if data.get("provider"):
+        data["provider"] = _format_provider(str(data["provider"]))
+
+
+def _format_customer_name(value: str) -> str:
+    """Add readable spacing to customer names when OCR joins words."""
+    value = clean_text(value)
+    value = re.sub(r"([a-z])([A-Z])", r"\1 \2", value)
+    words = []
+    for part in value.split():
+        for word in _split_repeated_uppercase_word(part):
+            words.extend(_split_common_name_tokens(word))
+    if len(words) >= 2:
+        suffix = words[1]
+        if len(words[0]) > len(suffix) + 2 and words[0].endswith(suffix):
+            words[0] = f"{words[0][:-len(suffix)]} {suffix}"
+    return clean_text(" ".join(words)).upper()
+
+
+def _split_repeated_uppercase_word(value: str) -> list[str]:
+    """Split compact OCR words like SAMPLECUSTOMERSAMPLECUSTOMER."""
+    if not value or not value.isupper() or len(value) < 8:
+        return [value]
+    half = len(value) // 2
+    if len(value) % 2 == 0 and value[:half] == value[half:]:
+        return [value[:half], value[half:]]
+    return [value]
+
+
+def _split_common_name_tokens(value: str) -> list[str]:
+    """Split uppercase OCR names using a small list of common given-name tokens."""
+    common_tokens = (
+        "SURAJUDEEN",
+        "TEMIDAYO",
+        "EMMANUEL",
+        "MICHAEL",
+        "EDWARD",
+        "OGUNNAIKE",
+        "OLABODE",
+        "EBUBE",
+    )
+    if not value or not value.isupper() or len(value) < 8:
+        return [value]
+    for token in common_tokens:
+        if value == token:
+            return [value]
+        if value.startswith(token) and len(value) > len(token) + 2:
+            return [token] + _split_common_name_tokens(value[len(token):])
+        if value.endswith(token) and len(value) > len(token) + 2:
+            return _split_common_name_tokens(value[:-len(token)]) + [token]
+    return [value]
+
+
+def _format_provider(value: str) -> str:
+    """Add spaces to common provider strings while preserving the original name."""
+    value = clean_text(value)
+    value = re.sub(r"([a-z])([A-Z])", r"\1 \2", value)
+    value = re.sub(r"(?i)(Abuja)(Electricity)", r"\1 \2", value)
+    value = re.sub(r"(?i)(Electricity)(Distribution)", r"\1 \2", value)
+    value = re.sub(r"(?i)(Distribution)(Prepaid)", r"\1 \2", value)
+    return clean_text(value)
 
 
 def _apply_date_age(data: Dict[str, Any], *, today: Optional[date]) -> None:
