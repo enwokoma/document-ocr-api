@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Any, Iterable
 
 from src.document_ocr.business_document.schema import (
-    ClassificationResult,
     UNKNOWN_BUSINESS_DOCUMENT,
+    ClassificationResult,
     confidence_level,
 )
 
@@ -35,6 +35,76 @@ class DocumentSignature:
 
 
 _SIGNATURES = (
+    DocumentSignature(
+        document_type="ARTICLES_OF_INCORPORATION",
+        high_score=10.0,
+        rules=(
+            MatchRule("articles of incorporation", r"\bARTICLES\s+OF\s+INCORPORATION\b", 9.0, True),
+            MatchRule("incorporator", r"\bINCORPORATORS?\b", 1.5),
+            MatchRule("corporation formation", r"\bFORM(?:ED|ATION)\s+(?:AS\s+)?A\s+CORPORATION\b", 2.0),
+            MatchRule("state filing", r"\b(?:SECRETARY\s+OF\s+STATE|DIVISION\s+OF\s+CORPORATIONS)\b", 1.0),
+        ),
+    ),
+    DocumentSignature(
+        document_type="ARTICLES_OF_ORGANIZATION",
+        high_score=10.0,
+        rules=(
+            MatchRule("articles of organization", r"\bARTICLES\s+OF\s+ORGANIZATION\b", 9.0, True),
+            MatchRule("limited liability company", r"\bLIMITED\s+LIABILITY\s+COMPANY\b|\bLLC\b", 1.5),
+            MatchRule("organizer", r"\bORGANIZERS?\b", 1.0),
+            MatchRule("state filing", r"\b(?:SECRETARY\s+OF\s+STATE|DIVISION\s+OF\s+CORPORATIONS)\b", 1.0),
+        ),
+    ),
+    DocumentSignature(
+        document_type="TAX_REGISTRATION_CERTIFICATE",
+        high_score=10.0,
+        rules=(
+            MatchRule("tax registration certificate", r"\b(?:TAX|VAT)\s+REGISTRATION\s+CERTIFICATE\b", 9.0, True),
+            MatchRule("taxpayer certificate", r"\bCERTIFICATE\s+OF\s+TAXPAYER\s+REGISTRATION\b", 8.0, True),
+            MatchRule("tax identifier", r"\b(?:TAX\s+IDENTIFICATION\s+NUMBER|TIN|VAT\s+NUMBER)\b", 2.0),
+            MatchRule("tax authority", r"\b(?:REVENUE\s+SERVICE|TAX\s+AUTHORITY|INTERNAL\s+REVENUE)\b", 1.5),
+        ),
+    ),
+    DocumentSignature(
+        document_type="BUSINESS_REGISTRATION_CERTIFICATE",
+        high_score=10.0,
+        rules=(
+            MatchRule("business registration certificate", r"\bBUSINESS\s+REGISTRATION\s+CERTIFICATE\b", 9.0, True),
+            MatchRule("business name certificate", r"\bCERTIFICATE\s+OF\s+BUSINESS\s+NAME\s+REGISTRATION\b", 8.0, True),
+            MatchRule("business registry", r"\bBUSINESS\s+(?:REGISTRY|REGISTER)\b", 2.0),
+            MatchRule("trading name", r"\b(?:TRADING\s+NAME|DOING\s+BUSINESS\s+AS|DBA)\b", 1.0),
+        ),
+    ),
+    DocumentSignature(
+        document_type="CERTIFICATE_OF_FORMATION",
+        high_score=10.0,
+        rules=(
+            MatchRule("certificate of formation", r"\bCERTIFICATE\s+OF\s+FORMATION\b", 9.0, True),
+            MatchRule("formation filing", r"\b(?:DATE\s+OF\s+FORMATION|FORMATION\s+DATE)\b", 2.0),
+            MatchRule("state registry", r"\b(?:SECRETARY\s+OF\s+STATE|DIVISION\s+OF\s+CORPORATIONS)\b", 1.5),
+        ),
+    ),
+    DocumentSignature(
+        document_type="CERTIFICATE_OF_GOOD_STANDING",
+        high_score=10.0,
+        rules=(
+            MatchRule("certificate of good standing", r"\bCERTIFICATE\s+OF\s+GOOD\s+STANDING\b", 9.0, True),
+            MatchRule("certificate of existence", r"\bCERTIFICATE\s+OF\s+(?:LEGAL\s+)?EXISTENCE\b", 8.0, True),
+            MatchRule("good standing", r"\b(?:IN\s+)?GOOD\s+STANDING\b", 2.0),
+            MatchRule("registry certification", r"\b(?:REGISTRAR|SECRETARY\s+OF\s+STATE)\b", 1.0),
+        ),
+    ),
+    DocumentSignature(
+        document_type="CAC_CERTIFICATE",
+        high_score=13.0,
+        minimum_score=5.0,
+        rules=(
+            MatchRule("Corporate Affairs Commission", r"\bCORPORATE\s+AFFAIRS\s+COMMISSION\b", 5.0, True),
+            MatchRule("CAC certificate", r"\bCAC\b.{0,60}\bCERTIFICATE\b|\bCERTIFICATE\b.{0,60}\bCAC\b", 4.0, True),
+            MatchRule("CAMA", r"\b(?:CAMA|COMPANIES\s+AND\s+ALLIED\s+MATTERS\s+ACT)\b", 2.0),
+            MatchRule("CAC identifier", r"\b(?:RC|BN|IT|LLP|LP)\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*\d{4,12}\b", 1.5),
+        ),
+    ),
     DocumentSignature(
         document_type="CERTIFICATE_OF_CHANGE_OF_NAME",
         high_score=10.0,
@@ -73,7 +143,7 @@ _SIGNATURES = (
     ),
     DocumentSignature(
         document_type="COMPANY_STATUS_REPORT",
-        high_score=12.0,
+        high_score=8.0,
         rules=(
             MatchRule("company status report", r"\b(?:COMPANY|ENTITY|BUSINESS)?\s*STATUS\s+REPORT\b", 8.0, True),
             MatchRule("company profile", r"\b(?:COMPANY|ENTITY)\s+PROFILE\b", 4.0, True),
@@ -127,6 +197,17 @@ _SIGNATURES = (
         negative_patterns=(r"\bMEMORANDUM\s+OF\s+ASSOCIATION\b",),
     ),
     DocumentSignature(
+        document_type="COMPANY_REGISTRY_EXTRACT",
+        high_score=9.0,
+        rules=(
+            MatchRule("company registry extract", r"\b(?:COMPANY|BUSINESS|ENTITY)\s+REGISTRY\s+EXTRACT\b", 8.0, True),
+            MatchRule("register extract", r"\b(?:REGISTER|REGISTRY)\s+EXTRACT\b", 5.0, True),
+            MatchRule("company search report", r"\b(?:COMPANY|ENTITY)\s+SEARCH\s+(?:REPORT|RESULT)\b", 4.0, True),
+            MatchRule("registered particulars", r"\bREGISTERED\s+PARTICULARS\b", 2.0),
+        ),
+        negative_patterns=(r"\bCERTIFIED\s+(?:TRUE\s+COPY|EXTRACT)\b",),
+    ),
+    DocumentSignature(
         document_type="CERTIFIED_REGISTRY_EXTRACT",
         high_score=10.0,
         rules=(
@@ -147,6 +228,13 @@ def normalize_classification_text(text: str) -> str:
     replacements = {
         "CERTIFICATEOFINCORPORATION": "CERTIFICATE OF INCORPORATION",
         "CERTIFICATEOFREGISTRATION": "CERTIFICATE OF REGISTRATION",
+        "BUSINESSREGISTRATIONCERTIFICATE": "BUSINESS REGISTRATION CERTIFICATE",
+        "TAXREGISTRATIONCERTIFICATE": "TAX REGISTRATION CERTIFICATE",
+        "ARTICLESOFINCORPORATION": "ARTICLES OF INCORPORATION",
+        "ARTICLESOFORGANIZATION": "ARTICLES OF ORGANIZATION",
+        "CERTIFICATEOFFORMATION": "CERTIFICATE OF FORMATION",
+        "CERTIFICATEOFGOODSTANDING": "CERTIFICATE OF GOOD STANDING",
+        "REGISTRYEXTRACT": "REGISTRY EXTRACT",
         "STATUSREPORT": "STATUS REPORT",
         "MEMORANDUMANDARTICLES": "MEMORANDUM AND ARTICLES",
         "MEMORANDUM&ARTICLES": "MEMORANDUM & ARTICLES",
@@ -167,13 +255,22 @@ def classify_business_document(text: str) -> ClassificationResult:
     scored = [_score_signature(normalized, signature) for signature in _SIGNATURES]
     scored.sort(key=lambda item: (item["confidence"], item["raw_score"]), reverse=True)
     best = scored[0]
+    best_confidence = float(best["confidence"])
+    best_score = float(best["raw_score"])
+    minimum_score = float(best["minimum_score"])
+    runner_up = next(
+        (item for item in scored[1:] if item["document_type"] != best["document_type"] and float(item["confidence"]) >= 0.40),
+        None,
+    )
+    ambiguous = bool(runner_up and best_confidence - float(runner_up["confidence"]) <= 0.08)
 
-    if best["raw_score"] < best["minimum_score"] or best["confidence"] < 0.40:
+    if best_score < minimum_score or best_confidence < 0.40:
         return ClassificationResult(
             document_type=UNKNOWN_BUSINESS_DOCUMENT,
-            confidence=min(0.39, best["confidence"]),
+            confidence=min(0.39, best_confidence),
             matched_terms=tuple(best["matched_terms"]),
             alternatives=tuple(_serialize_alternatives(scored[:3])),
+            ambiguous=ambiguous,
         )
 
     return ClassificationResult(
@@ -181,6 +278,7 @@ def classify_business_document(text: str) -> ClassificationResult:
         confidence=float(best["confidence"]),
         matched_terms=tuple(best["matched_terms"]),
         alternatives=tuple(_serialize_alternatives(scored[1:4])),
+        ambiguous=ambiguous,
     )
 
 
@@ -195,7 +293,7 @@ def classification_keywords() -> tuple[str, ...]:
     return tuple(dict.fromkeys(rule.label.upper() for signature in _SIGNATURES for rule in signature.rules))
 
 
-def _score_signature(normalized: str, signature: DocumentSignature) -> dict[str, object]:
+def _score_signature(normalized: str, signature: DocumentSignature) -> dict[str, Any]:
     matched_terms = []
     raw_score = 0.0
     anchor_found = False
@@ -234,7 +332,7 @@ def _score_signature(normalized: str, signature: DocumentSignature) -> dict[str,
     }
 
 
-def _serialize_alternatives(items: Iterable[dict[str, object]]) -> list[dict[str, object]]:
+def _serialize_alternatives(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     alternatives = []
     for item in items:
         score = float(item["confidence"])
