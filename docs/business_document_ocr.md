@@ -4,11 +4,12 @@ The business-document endpoint extracts a reviewable, jurisdiction-aware company
 
 ## Endpoint
 
-`POST /api/business-document` accepts `multipart/form-data`.
+`POST /api/business-document` accepts either a multipart upload or a document URL in a form/JSON request body. Provide exactly one source.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `file` | yes | PDF or supported image upload |
+| `file` | conditional | PDF or supported image upload; mutually exclusive with `url` |
+| `url` / `document_url` | conditional | Public HTTPS PDF/image URL; mutually exclusive with `file` |
 | `country` | no | ISO alpha-3 code, registered alpha-2 alias, or registered country-name alias |
 | `jurisdiction` | no | State, province, or other subnational incorporation-jurisdiction hint |
 | `document_type` | no | A code from the business-document taxonomy, such as `CERTIFICATE_OF_INCORPORATION` |
@@ -28,6 +29,20 @@ curl -X POST http://localhost:5005/api/business-document \
   -F "document_type=CERTIFICATE_OF_INCORPORATION"
 ```
 
+The equivalent URL request is:
+
+```bash
+curl -X POST http://localhost:5005/api/business-document \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://files.example.com/sample-company-certificate.pdf",
+    "country": "NGA",
+    "document_type": "CERTIFICATE_OF_INCORPORATION"
+  }'
+```
+
+The URL must be in the request body, not the query string. The [README shared document-input section](../README.md#shared-document-input) documents remote URL policy, limits, aliases, security controls, and configuration.
+
 PowerShell example for the local Nigerian samples (adjust the port if the server was started on `5000` instead of the application's default `5005`):
 
 ```powershell
@@ -46,15 +61,16 @@ Use the same endpoint for all three samples. The document-type hint is optional;
 
 The current `MEMART.pdf` has 28 pages, while the safe default processes 20. To extract all of it, set `BUSINESS_DOCUMENT_MAX_PAGES=40` before starting the server; the configured decoded-pixel and request-size limits still apply.
 
-The upload inspector accepts PDF, JPEG, PNG, TIFF, BMP, and WebP signatures. A recognized filename extension that disagrees with the content signature is rejected. Invalid, empty, or unreadable uploads return HTTP 400. A request rejected by Flask's pre-multipart body cap returns HTTP 413; a file that exceeds the configured upload limit after parsing returns 400. A parsed document returns HTTP 200 even when its type or jurisdiction is unknown; callers must inspect confidence and warnings. An unhandled server error returns HTTP 500.
+The shared source resolver accepts PDF, JPEG, PNG, TIFF, BMP, and WebP signatures and normalizes the filename extension from the content signature. Invalid, empty, or unreadable uploads return HTTP 400. Unsupported remote content returns HTTP 415, unsafe destinations return HTTP 403, upstream retrieval failures return HTTP 502/504, and size-limit failures return HTTP 413. A parsed document returns HTTP 200 even when its type or jurisdiction is unknown; callers must inspect confidence and warnings. An unhandled server error returns HTTP 500.
 
-The HTTP route adds a `request_id` to the processor response and pretty-prints its JSON body. Other endpoints retain the repository's compact JSON convention.
+The HTTP route adds a `request_id` to the processor response. JSON indentation is configured application-wide, so business-document, legacy OCR, metadata, health, webhook, and JSON error responses are all human-readable.
 
 ## Architecture and processing flow
 
 ```text
 Flask route
-  -> upload signature and size inspection
+  -> shared bounded upload-or-URL resolution and content-signature inspection
+  -> business upload inspection
   -> page-aware embedded-PDF text / rendered OCR selection
   -> document classification
   -> country and subdivision detection
@@ -68,7 +84,8 @@ Flask route
 
 The main modules have deliberately narrow responsibilities:
 
-- `src/api/routes.py` handles multipart input, optional hints, status codes, request IDs, and metadata-only logging.
+- `src/core/document_source.py` handles the universal upload/URL contract, content signatures, URL policy, bounded streaming, and temporary-resource cleanup.
+- `src/api/routes.py` applies the shared source resolver, optional hints, status codes, request IDs, and metadata-only logging.
 - `config.py` and `upload.py` enforce bounded processing and verify file signatures.
 - `text_extraction.py` is the shared page-aware PDF/image OCR layer.
 - `classification.py` provides an explainable business-document taxonomy result.
@@ -366,13 +383,24 @@ State registries vary substantially. The built-in profile supplies common eviden
 
 | Environment variable | Default | Accepted bound/meaning |
 | --- | ---: | --- |
+| `DOCUMENT_MAX_UPLOAD_BYTES` | `20971520` | Universal upload/URL byte cap; clamped to 1 KiB-100 MiB |
+| `DOCUMENT_INPUT_SPOOL_MEMORY_BYTES` | `1048576` | Remote bytes retained in memory before spooling to a temporary file |
+| `DOCUMENT_URL_ENABLED` | `1` | Enables URL retrieval |
+| `DOCUMENT_URL_ALLOW_HTTP` | `0` | Opt-in for plain HTTP; also configure port 80 if needed |
+| `DOCUMENT_URL_ALLOWED_PORTS` | `443` | Comma-separated remote-port allowlist |
+| `DOCUMENT_URL_ALLOWED_HOSTS` | empty | Optional exact/wildcard host allowlist |
+| `DOCUMENT_URL_CONNECT_TIMEOUT_SECONDS` | `3` | Per-connection timeout, clamped to 0.5-30 seconds |
+| `DOCUMENT_URL_READ_TIMEOUT_SECONDS` | `8` | Per-read timeout, clamped to 0.5-60 seconds |
+| `DOCUMENT_URL_TOTAL_TIMEOUT_SECONDS` | `20` | Whole remote retrieval deadline, clamped to 1-120 seconds |
+| `DOCUMENT_URL_MAX_REDIRECTS` | `3` | Revalidated redirect limit, clamped to 0-10 |
+| `DOCUMENT_URL_MAX_LENGTH` | `2048` | URL length limit, clamped to 256-8192 characters |
 | `BUSINESS_DOCUMENT_MAX_PAGES` | `20` | Clamped to 1-100 pages |
 | `BUSINESS_DOCUMENT_MAX_UPLOAD_BYTES` | `20971520` | Clamped to 1 KiB-100 MiB |
 | `BUSINESS_DOCUMENT_MAX_IMAGE_PIXELS` | `25000000` | Decoded image/PDF-page pixel cap; clamped to 1-50 million |
 | `BUSINESS_DOCUMENT_MAX_PAGE_TEXT_CHARS` | `100000` | Retained characters per page; clamped to 10,000-500,000 |
 | `BUSINESS_DOCUMENT_COMPARE_RENDERED_PDF_TEXT` | `1` | Enables rendered comparison when embedded page text is weak |
 
-The request-scoped body cap for `/api/business-document` is initialized to the upload limit plus 1 MiB for multipart framing, preventing oversized bodies from being materialized before route validation without changing legacy endpoint limits. The processor separately enforces the exact file-byte limit. Images are inspected for decoded dimensions before OpenCV decoding; PDF render scale is reduced to remain within the same per-page pixel budget. Strong selectable PDF text skips rendered OCR, and confidently readable upright OCR skips rotation retries.
+The request-scoped body cap applies to every OCR route and is initialized to `DOCUMENT_MAX_UPLOAD_BYTES` plus 1 MiB for multipart framing, preventing oversized bodies from being materialized before route validation. The webhook route is not affected. The shared resolver enforces the exact upload/remote byte cap; the business processor separately applies `BUSINESS_DOCUMENT_MAX_UPLOAD_BYTES`. The lower applicable limit wins. Images are inspected for decoded dimensions before OpenCV decoding; PDF render scale is reduced to remain within the same per-page pixel budget. Strong selectable PDF text skips rendered OCR, and confidently readable upright OCR skips rotation retries.
 
 When the page limit is exceeded, processing continues for the retained pages, `extraction.truncated` is true, and a warning is returned. Text over the per-page character limit is truncated with a warning. Comparing rendered OCR with weak embedded text improves scanned/malformed PDF handling but increases CPU and latency.
 
@@ -380,7 +408,7 @@ Structured extraction is also bounded: objects, parties, evidence excerpts, role
 
 ## Safe logging and observability
 
-The route logs one structured completion record containing request ID, content length, detected file type, pages processed, booleans indicating which hints were supplied, selected document type/country, success, warning count, and duration. Exception logs retain similarly bounded request metadata.
+The route logs one structured completion record containing request ID, input source (`upload` or `url`), source size, content length, detected file type, pages processed, booleans indicating which hints were supplied, selected document type/country, success, warning count, and duration. Exception logs retain similarly bounded request metadata. It does not log the remote URL.
 
 Do not add raw OCR text, evidence excerpts, company names, addresses, identifier values, uploaded bytes, filenames, email addresses, phone numbers, or party details to logs. These can be sensitive business or personal data. Use `request_id`, counts, classifications, timing, and non-content error categories for correlation. Apply the same rule to traces, metrics labels, and error-reporting services.
 
@@ -396,6 +424,7 @@ The API intentionally returns `raw_text` and evidence to the authorized caller f
 - Ambiguous numeric dates, jurisdictions, currencies, identifiers, and competing field values require review; consult `warnings`, `conflicts`, and evidence.
 - Page and section limits can omit information from very long status reports or constitutional documents.
 - OCR executes synchronously; production deployments still need gateway timeouts, concurrency limits, and rate limiting appropriate to available CPU and memory.
+- URL retrieval supports directly accessible documents only; authenticated portals, cookies, caller-supplied remote credentials, and interactive login flows are intentionally unsupported.
 - Party extraction is conservative and may omit rows rather than risk interpreting addresses or table metadata as people.
 - Ownership relationships are extracted as public party records; the pipeline does not build or validate a complete ownership graph.
 - `success: true` means usable text reached the parsing pipeline, not that all requested fields were found. Gate automated decisions on required fields, confidence, warnings, and application-specific validation.

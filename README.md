@@ -15,6 +15,8 @@ The codebase is organized so new document types and country-specific rules can b
 - HMAC request-signing utilities for production authentication.
 - OCR backend abstraction with RapidOCR first and optional EasyOCR fallback.
 - Business-document classification, jurisdiction detection, typed identifiers, field-level confidence/evidence, conflict reporting, and generic fallback extraction.
+- One shared file-or-URL input layer for every OCR endpoint, with bounded retrieval and SSRF defenses.
+- Human-readable, indented JSON for every JSON API response.
 
 ## Project Structure
 
@@ -32,6 +34,7 @@ document-ocr-api/
       nigeria/
     core/
       auth.py
+      document_source.py
       flash_glance.py
       ocr_engine.py
     document_ocr/
@@ -88,6 +91,18 @@ FORWARDER_TARGET_3_URL=https://endpoint3.example.com/webhook
 
 ENABLE_EASYOCR_FALLBACK=0
 
+DOCUMENT_MAX_UPLOAD_BYTES=20971520
+DOCUMENT_INPUT_SPOOL_MEMORY_BYTES=1048576
+DOCUMENT_URL_ENABLED=1
+DOCUMENT_URL_ALLOW_HTTP=0
+DOCUMENT_URL_ALLOWED_PORTS=443
+DOCUMENT_URL_ALLOWED_HOSTS=
+DOCUMENT_URL_CONNECT_TIMEOUT_SECONDS=3
+DOCUMENT_URL_READ_TIMEOUT_SECONDS=8
+DOCUMENT_URL_TOTAL_TIMEOUT_SECONDS=20
+DOCUMENT_URL_MAX_REDIRECTS=3
+DOCUMENT_URL_MAX_LENGTH=2048
+
 BUSINESS_DOCUMENT_MAX_PAGES=20
 BUSINESS_DOCUMENT_MAX_UPLOAD_BYTES=20971520
 BUSINESS_DOCUMENT_MAX_IMAGE_PIXELS=25000000
@@ -96,6 +111,8 @@ BUSINESS_DOCUMENT_COMPARE_RENDERED_PDF_TEXT=1
 ```
 
 `FORWARDER_*` settings are only required if `/api/webhooks/forward` is used.
+
+`DOCUMENT_URL_ALLOWED_HOSTS` is an optional comma-separated allowlist. It accepts exact hosts and leading wildcards such as `documents.example.com,*.trusted.example`. Leave it empty to allow any public destination that passes the network checks. If HTTP is intentionally enabled, also add port `80` to `DOCUMENT_URL_ALLOWED_PORTS`.
 
 ## Running
 
@@ -116,6 +133,38 @@ For production-style serving:
 ```bash
 gunicorn --bind 0.0.0.0:5005 --workers 4 --timeout 120 app:app
 ```
+
+## Shared document input
+
+Every OCR endpoint accepts exactly one document source:
+
+- Multipart upload: `file=@document.pdf`
+- Body URL in form data: `url=https://files.example.com/document.pdf`
+- Body URL in JSON: `{"url":"https://files.example.com/document.pdf"}`
+
+`document_url` is accepted as an alias for `url`. Optional endpoint hints such as `country`, `jurisdiction`, and `document_type` can be included in the same form or JSON body. Do not put document URLs in the query string: signed URLs often contain credentials, and query strings are more likely to be retained in access logs.
+
+Upload example in PowerShell:
+
+```powershell
+curl.exe -X POST "http://localhost:5005/api/business-document" `
+  -F "file=@C:\path\to\certificate.pdf" `
+  -F "country=NGA"
+```
+
+URL example in PowerShell:
+
+```powershell
+curl.exe -X POST "http://localhost:5005/api/business-document" `
+  -H "Content-Type: application/json" `
+  -d '{"url":"https://files.example.com/certificate.pdf","country":"NGA"}'
+```
+
+Remote retrieval is enabled for public HTTPS URLs by default. The resolver rejects credentials, fragments, unapproved ports, non-public or mixed public/private DNS answers, redirect loops, HTTPS-to-HTTP downgrades, compressed responses, unsupported file signatures, and responses over the configured byte limit. It revalidates every redirect, connects to a validated address while preserving TLS hostname verification, ignores environment proxy settings, and applies connect/read/total timeouts. Remote endpoints that require cookies, authorization headers, or interactive login are not supported.
+
+Passport, legacy passport scan, and NIN routes accept images only. The other OCR routes accept PDFs and supported images (JPEG, PNG, TIFF, BMP, and WebP). File type is determined from content bytes, not a filename or remote `Content-Type` claim.
+
+All responses produced as JSON—including errors and legacy endpoint responses—are indented for readability. Clients should still parse JSON rather than depend on whitespace.
 
 ## Endpoints
 
@@ -143,7 +192,7 @@ POST /api/scan-passport
 
 Form data:
 
-- `file`: passport image
+- `file` or `url`: passport image source
 - `country` (optional): ISO-3166 alpha-3 country hint, for example `NGA`
 
 Example:
@@ -161,7 +210,7 @@ POST /api/nin
 
 Form data:
 
-- `file`: NIN card or slip image
+- `file` or `url`: NIN card or slip image source
 - `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
 
 ### Bank Statement Extraction
@@ -172,7 +221,7 @@ POST /api/bank-statement
 
 Form data:
 
-- `file`: PDF or image bank statement
+- `file` or `url`: PDF or image bank statement source
 
 ### Utility Bill / Receipt Extraction
 
@@ -182,7 +231,7 @@ POST /api/utility-bill
 
 Form data:
 
-- `file`: utility bill or utility payment receipt image/PDF
+- `file` or `url`: utility bill or utility payment receipt image/PDF source
 - `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
 
 The utility bill response focuses on proof-of-address checks. It returns the
@@ -207,7 +256,7 @@ POST /api/voter-id
 
 Form data:
 
-- `file`: voter document image, or PDF with embedded text
+- `file` or `url`: voter document image, or PDF with embedded text
 - `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
 
 `voter_id` is the canonical processor name. Country metadata keeps local naming
@@ -221,7 +270,7 @@ POST /api/drivers-license
 
 Form data:
 
-- `file`: driver's license image, or PDF with embedded text
+- `file` or `url`: driver's license image, or PDF with embedded text
 - `country` (optional): ISO-3166 alpha-3 country code. Defaults to `NGA`.
 
 For these newer identity processors, the runtime flow is:
@@ -243,7 +292,7 @@ POST /api/business-document
 
 Form data:
 
-- `file`: PDF, JPEG, PNG, TIFF, BMP, or WebP business document
+- `file` or `url`: PDF, JPEG, PNG, TIFF, BMP, or WebP business document source
 - `country` (optional): country code or registered country alias, for example `NGA` or `USA`
 - `jurisdiction` (optional): state, province, or other subnational jurisdiction hint
 - `document_type` (optional): taxonomy code, for example `CERTIFICATE_OF_INCORPORATION`
@@ -422,8 +471,8 @@ pip install -r requirements-dev.txt
 Run the complete local quality gate with:
 
 ```bash
-ruff format --check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
-ruff check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+ruff format --check app.py src/api/routes.py src/core/document_source.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py tests/test_document_source.py tests/test_url_input_api.py
+ruff check app.py src/api/routes.py src/core/document_source.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py tests/test_document_source.py tests/test_url_input_api.py
 mypy
 python -m pytest tests -v
 ```
@@ -432,7 +481,8 @@ Tests cover route behavior, parser rules, country profiles, page-aware text extr
 
 ## Security Notes
 
-- The API processes uploads in memory and does not persist documents by default.
+- The API does not persist document uploads or URL downloads by default. Larger URL responses spill from memory to an unnamed temporary file and are closed after processing.
+- URL ingestion expands the service's outbound-network surface. Keep the public-address checks enabled, consider a strict `DOCUMENT_URL_ALLOWED_HOSTS` allowlist, restrict egress at the infrastructure layer, and apply rate/concurrency limits.
 - Business-document responses intentionally contain raw OCR text and evidence; treat them as sensitive and do not log them.
 - Use a strong `OCR_SECRET_KEY` before production deployment.
 - Re-enable HMAC verification before public exposure.
