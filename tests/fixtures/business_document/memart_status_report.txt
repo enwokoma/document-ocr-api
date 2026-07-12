@@ -1,0 +1,25 @@
+MEMORANDUM AND ARTICLES OF ASSOCIATION
+OF
+SAMPLE MANUFACTURING LIMITED
+RC 7654321
+
+OBJECTS OF THE COMPANY
+1. To manufacture and distribute sample industrial products.
+2. To carry on any lawful activities incidental to those objects.
+
+SHARE CAPITAL
+The issued share capital of the company is NGN 500 divided into 500 ordinary shares of NGN 1 each.
+Paid-up capital: NGN 250
+
+DIRECTORS
+Name                         Status
+Alex Example                 Active
+Jordan Sample                Active
+
+SHAREHOLDERS
+Sample Holdings Limited      Shares: 300  60%
+Alex Example                 Shares: 200  40%
+
+BENEFICIAL OWNERS
+Name: Alex Example
+Percentage: 40%
