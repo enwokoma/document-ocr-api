@@ -27,17 +27,19 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest pytest-cov
+        pip install -r requirements-dev.txt
 
-    - name: Lint with flake8 (optional)
+    - name: Check formatting
       run: |
-        pip install flake8
-        # Stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # Exit-zero treats all errors as warnings
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-      continue-on-error: true
+        ruff format --check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+
+    - name: Lint
+      run: |
+        ruff check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+
+    - name: Type check
+      run: |
+        mypy
 
     - name: Run tests with pytest
       run: |
@@ -64,6 +66,5 @@ jobs:
     - name: Verify application startup
       run: |
         pip install -r requirements.txt
-        timeout 5 python app.py || true
-      continue-on-error: true
+        python -c "from app import app; assert app is not None"
 
