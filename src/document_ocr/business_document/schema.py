@@ -53,8 +53,10 @@ CANONICAL_BUSINESS_DATA_KEYS = (
 CANONICAL_SHARE_CAPITAL_KEYS = (
     "currency",
     "amount",
+    "paid_up_amount",
     "amount_text",
     "issued_share_count",
+    "share_class",
     "nominal_value_per_share",
 )
 
