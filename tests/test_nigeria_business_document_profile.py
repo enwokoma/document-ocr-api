@@ -28,6 +28,44 @@ def test_cac_company_registration_number_has_company_identifier_type():
     assert not any("matched multiple types" in warning for warning in result.warnings)
 
 
+def test_cac_certificate_certifies_that_phrase_selects_legal_company_name():
+    text = """FEDERAL REPUBLIC OF NIGERIA
+    CERTIFICATE OF INCORPORATION
+    OF A
+    PRIVATE COMPANY LIMITED BY SHARES
+    The Registrar - General of Corporate Affairs Commission
+    hereby certifies that
+    ALPHA PLATFORM NIGERIA LTD
+    is this day incorporated under the
+    COMPANIES AND ALLIED MATTERS ACT 2020
+    """
+
+    result = parse_core_business_fields(
+        text,
+        jurisdiction=detect_business_jurisdiction(text),
+        document_type="CERTIFICATE_OF_INCORPORATION",
+    )
+
+    assert result.data["company_name"] == "ALPHA PLATFORM NIGERIA LTD"
+    assert next(item for item in result.evidence if item.field == "company_name").method == "certificate_or_title_phrase"
+
+
+def test_company_name_fallback_rejects_legal_form_and_narrative_lines():
+    text = """CERTIFICATE OF INCORPORATION
+    COMPANY LIMITED BY SHARES
+    BETA SERVICES NIGERIA LTD
+    is this day incorporated under the governing law
+    """
+
+    result = parse_core_business_fields(
+        text,
+        jurisdiction=detect_business_jurisdiction(text, "NGA"),
+        document_type="CERTIFICATE_OF_INCORPORATION",
+    )
+
+    assert result.data["company_name"] == "BETA SERVICES NIGERIA LTD"
+
+
 def test_separate_memorandum_and_articles_headings_classify_as_combined_document():
     text = """FEDERAL REPUBLIC OF NIGERIA
     COMPANIES AND ALLIED MATTERS ACT, 2020

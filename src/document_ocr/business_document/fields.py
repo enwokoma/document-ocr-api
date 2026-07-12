@@ -48,6 +48,18 @@ _NON_NAME_MARKERS = (
     "BUSINESS REGISTRATION SERVICE",
 )
 
+_LEGAL_FORM_ONLY_RE = re.compile(
+    r"^(?:(?:PRIVATE|PUBLIC)\s+)?COMPANY\s+LIMITED\s+BY\s+(?:SHARES|GUARANTEE)$|"
+    r"^LIMITED\s+LIABILITY\s+(?:COMPANY|PARTNERSHIP)$|"
+    r"^INCORPORATED\s+TRUSTEES?$",
+    re.IGNORECASE,
+)
+
+_CERTIFICATE_NARRATIVE_RE = re.compile(
+    r"^(?:IS|WAS|HAS\s+BEEN|HEREBY|THIS\s+DAY|THAT\s+DAY)\b.*\b(?:INCORPORATED|REGISTERED)\b",
+    re.IGNORECASE,
+)
+
 _GENERIC_LABEL_RE = re.compile(
     r"^(?:COMPANY|ENTITY|BUSINESS|REGISTERED|HEAD\s+OFFICE|REGISTRATION|INCORPORATION|DOCUMENT|REPORT|"
     r"NATURE\s+OF\s+BUSINESS|PRINCIPAL\s+ACTIVITY|STATUS|DATE|EMAIL|PHONE|TELEPHONE|TIN|TAX|SHARE|"
@@ -217,7 +229,9 @@ def parse_core_business_fields(
 
 def _extract_company_name(text: str, lines: Sequence[str], *, document_type: str) -> Optional[_ValueMatch]:
     phrase_patterns = (
-        r"(?:THIS\s+IS\s+TO|I\s+HEREBY)\s+CERTIF(?:Y|IES)\s+THAT\s+([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180}?)\s+(?:IS|WAS|HAS\s+BEEN)\s+(?:HEREBY\s+)?(?:INCORPORATED|REGISTERED)",
+        r"(?:THIS\s+IS\s+TO|I\s+HEREBY|HEREBY)\s+CERTIF(?:Y|IES)\s+THAT\s+"
+        r"([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180}?)\s+(?:IS|WAS|HAS\s+BEEN)\s+"
+        r"(?:(?:THIS|THAT)\s+DAY\s+)?(?:HEREBY\s+)?(?:INCORPORATED|REGISTERED)",
         r"\bCERTIFICATE\s+OF\s+(?:INCORPORATION|REGISTRATION)\s+(?:OF|FOR)\s+([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180})",
         r"\bMEMORANDUM(?:\s+AND\s+ARTICLES)?\s+OF\s+ASSOCIATION\s+OF\s+([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180})",
     )
@@ -564,6 +578,8 @@ def _looks_like_company_name(value: str) -> bool:
     if len(cleaned) < 3 or len(cleaned) > 180 or len(re.findall(r"[A-Z]", upper)) < 3:
         return False
     if any(marker in upper for marker in _NON_NAME_MARKERS):
+        return False
+    if _LEGAL_FORM_ONLY_RE.fullmatch(cleaned) or _CERTIFICATE_NARRATIVE_RE.search(cleaned):
         return False
     if re.fullmatch(r"[\d /.-]+", cleaned):
         return False
