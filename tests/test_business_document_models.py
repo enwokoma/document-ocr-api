@@ -4,6 +4,7 @@ These tests use synthetic OCR text only.  OCR backends, uploads, and external
 services are intentionally outside their scope.
 """
 
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -25,11 +26,13 @@ from src.document_ocr.business_document.jurisdictions import (
     unregister_business_jurisdiction,
 )
 from src.document_ocr.business_document.language import detect_document_language
+from src.document_ocr.business_document.processor import parse_business_document_text
 from src.document_ocr.business_document.schema import (
     BUSINESS_DOCUMENT_TYPES,
     CANONICAL_BUSINESS_DATA_KEYS,
     CANONICAL_IDENTIFIER_KEYS,
     UNKNOWN_BUSINESS_DOCUMENT,
+    business_document_response_view,
     canonical_business_data,
 )
 
@@ -330,3 +333,42 @@ def test_business_document_settings_clamp_resource_limits(monkeypatch):
     assert settings.max_image_pixels == 1_000_000
     assert settings.max_page_text_chars == 500_000
     assert settings.compare_rendered_pdf_text is False
+
+
+def test_summary_response_is_concise_auditable_and_does_not_mutate_full_payload():
+    text = _fixture_text("nigeria_cac_certificate.txt")
+    full = parse_business_document_text(text, page_texts=(text,))
+    original = deepcopy(full)
+
+    summary = business_document_response_view(full)
+
+    assert full == original
+    assert business_document_response_view(full, detail="full") == full
+    assert summary["response_detail"] == "summary"
+    assert summary["raw_text"] == text.strip()
+    assert "classification" not in summary
+    assert "field_confidence" not in summary
+    assert "evidence" not in summary
+    assert "trading_name" not in summary["data"]
+    assert "incorporation_or_registration_date" not in summary["data"]
+    assert summary["field_details"]["legal_company_name"]["confidence"] > 0
+    assert summary["field_details"]["legal_company_name"]["evidence"]["text"]
+    for identifier in summary["data"]["identifiers"]:
+        assert identifier["confidence"] > 0
+        assert len(identifier["evidence"]) == 1
+        assert len(identifier["evidence"][0]["text"]) < 100
+        if identifier.get("normalized_value") == identifier.get("value"):
+            pytest.fail("Summary identifiers must not repeat an unchanged normalized value")
+
+
+def test_summary_response_uses_one_role_aware_party_collection():
+    text = _fixture_text("memart_status_report.txt")
+    full = parse_business_document_text(text, page_texts=(text,))
+
+    summary = business_document_response_view(full)
+
+    assert "directors" not in summary["data"]
+    assert "shareholders" not in summary["data"]
+    assert "beneficial_owners" not in summary["data"]
+    assert summary["data"]["parties"]
+    assert all(party["roles"] for party in summary["data"]["parties"])

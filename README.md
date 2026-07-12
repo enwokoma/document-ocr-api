@@ -304,13 +304,22 @@ Form data:
 - `country` (optional): country code or registered country alias, for example `NGA` or `USA`
 - `jurisdiction` (optional): state, province, or other subnational jurisdiction hint
 - `document_type` (optional): taxonomy code, for example `CERTIFICATE_OF_INCORPORATION`
+- `response_detail` (optional): `summary` (default) or `full`
 
-The response uses one global schema for certificates, registry extracts, status reports, constitutional documents, tax certificates, and unknown business records. It includes typed registration/tax identifiers, confidence and evidence by field, warnings and retained conflicts, page-extraction diagnostics, raw OCR text, and unclassified label/value fields. Nigeria and United States profiles are built in; unknown jurisdictions use the generic fallback.
+The default summary response removes empty fields, repeated role projections, duplicate confidence bands, classification alternatives, and verbose page/candidate diagnostics. It retains typed registration/tax identifiers, concise confidence and evidence, warnings/conflicts, extraction totals, raw OCR text, and unclassified fields. Nigeria and United States profiles are built in; unknown jurisdictions use the generic fallback.
 
 ```bash
 curl -X POST http://localhost:5005/api/business-document \
   -F "file=@certificate.pdf" \
   -F "country=NGA"
+```
+
+Request the complete audit/debug representation when every candidate, alternative, page diagnostic, and derived role list is needed:
+
+```bash
+curl -X POST http://localhost:5005/api/business-document \
+  -F "file=@certificate.pdf" \
+  -F "response_detail=full"
 ```
 
 See [Business-document OCR](docs/business_document_ocr.md) for the complete response contract, supported taxonomy, profile-extension example, limits, privacy guidance, and known limitations.

@@ -28,6 +28,8 @@ BUSINESS_DOCUMENT_TYPES: Dict[str, str] = {
     UNKNOWN_BUSINESS_DOCUMENT: "Unrecognized business or company document",
 }
 
+BUSINESS_RESPONSE_DETAILS = {"summary", "full"}
+
 CANONICAL_BUSINESS_DATA_KEYS = (
     "legal_company_name",
     "trading_name",
@@ -428,6 +430,201 @@ class BusinessDocumentResponse:
             "extraction": dict(self.extraction),
             "raw_text": self.raw_text,
         }
+
+
+def business_document_response_view(payload: Mapping[str, Any], *, detail: str = "summary") -> Dict[str, Any]:
+    """Return the concise HTTP view or the complete audit/debug representation."""
+    normalized_detail = str(detail or "summary").strip().lower()
+    if normalized_detail not in BUSINESS_RESPONSE_DETAILS:
+        raise ValueError("response_detail must be either 'summary' or 'full'.")
+    if normalized_detail == "full":
+        return dict(payload)
+
+    classification = payload.get("classification")
+    classification_data = dict(classification) if isinstance(classification, Mapping) else {}
+    jurisdiction = payload.get("jurisdiction")
+    jurisdiction_data = dict(jurisdiction) if isinstance(jurisdiction, Mapping) else {}
+    extraction = payload.get("extraction")
+    extraction_data = dict(extraction) if isinstance(extraction, Mapping) else {}
+    raw_data = payload.get("data")
+    raw_text = str(payload.get("raw_text") or "")
+    data = _summary_business_data(raw_data if isinstance(raw_data, Mapping) else {}, raw_text=raw_text)
+
+    output: Dict[str, Any] = {
+        "success": bool(payload.get("success")),
+        "message": payload.get("message"),
+        "response_detail": "summary",
+        "document_type": payload.get("document_type") or UNKNOWN_BUSINESS_DOCUMENT,
+        "document_type_confidence": classification_data.get("confidence"),
+        "overall_confidence": payload.get("overall_confidence", 0.0),
+        "jurisdiction": _summary_jurisdiction(jurisdiction_data),
+        "data": data,
+        "field_details": _summary_field_details(payload),
+        "warnings": list(payload.get("warnings") or []),
+        "conflicts": list(payload.get("conflicts") or []),
+        "extraction": _summary_extraction(extraction_data),
+        "raw_text": raw_text,
+    }
+    if payload.get("request_id"):
+        output["request_id"] = payload["request_id"]
+    return output
+
+
+def _summary_business_data(data: Mapping[str, Any], *, raw_text: str) -> Dict[str, Any]:
+    """Drop empty values and collapse derived role projections into one party list."""
+    prepared = dict(data)
+    raw_identifiers = prepared.get("identifiers")
+    if isinstance(raw_identifiers, (list, tuple)):
+        prepared["identifiers"] = [
+            _summary_identifier(item, raw_text=raw_text) for item in raw_identifiers if isinstance(item, Mapping)
+        ]
+    prepared["parties"] = _summary_parties(prepared)
+    for party_key in ("directors", "shareholders", "beneficial_owners"):
+        prepared.pop(party_key, None)
+    combined_date = prepared.get("incorporation_or_registration_date")
+    if combined_date and combined_date in {prepared.get("incorporation_date"), prepared.get("registration_date")}:
+        prepared.pop("incorporation_or_registration_date", None)
+    return _compact_mapping(prepared)
+
+
+def _summary_identifier(identifier: Mapping[str, Any], *, raw_text: str) -> Dict[str, Any]:
+    output = {key: value for key, value in identifier.items() if key != "evidence"}
+    if output.get("normalized_value") == output.get("value"):
+        output.pop("normalized_value", None)
+    raw_evidence = identifier.get("evidence")
+    if isinstance(raw_evidence, (list, tuple)):
+        selected = next((item for item in raw_evidence if isinstance(item, Mapping)), None)
+        if selected:
+            evidence_text = selected.get("text")
+            start = selected.get("start")
+            end = selected.get("end")
+            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(raw_text):
+                evidence_text = raw_text[start:end]
+            output["evidence"] = [
+                {
+                    key: value
+                    for key, value in (
+                        ("method", selected.get("method")),
+                        ("pattern_label", selected.get("pattern_label")),
+                        ("page", selected.get("page")),
+                        ("text", evidence_text),
+                    )
+                    if value not in (None, "")
+                }
+            ]
+    return output
+
+
+def _summary_parties(data: Mapping[str, Any]) -> list[Dict[str, Any]]:
+    raw_parties = data.get("parties")
+    if isinstance(raw_parties, (list, tuple)) and raw_parties:
+        return [
+            {key: value for key, value in party.items() if key != "evidence"}
+            for party in raw_parties
+            if isinstance(party, Mapping)
+        ]
+
+    combined: list[Dict[str, Any]] = []
+    role_collections = (
+        ("directors", "DIRECTOR"),
+        ("shareholders", "SHAREHOLDER"),
+        ("beneficial_owners", "BENEFICIAL_OWNER"),
+    )
+    for collection_name, default_role in role_collections:
+        collection = data.get(collection_name)
+        if not isinstance(collection, (list, tuple)):
+            continue
+        for raw_party in collection:
+            if not isinstance(raw_party, Mapping):
+                continue
+            party = {key: value for key, value in raw_party.items() if key != "evidence"}
+            roles = list(party.get("roles") or [])
+            if default_role not in roles:
+                roles.append(default_role)
+            party["roles"] = roles
+            if party not in combined:
+                combined.append(party)
+    return combined
+
+
+def _summary_field_details(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    raw_confidence = payload.get("field_confidence")
+    confidence_by_field = raw_confidence if isinstance(raw_confidence, Mapping) else {}
+    raw_evidence = payload.get("evidence")
+    evidence_by_field = raw_evidence if isinstance(raw_evidence, Mapping) else {}
+    output: Dict[str, Any] = {}
+    for field_name, confidence_data in confidence_by_field.items():
+        if field_name in {"identifiers", "additional_fields"} or not isinstance(confidence_data, Mapping):
+            continue
+        details: Dict[str, Any] = {"confidence": confidence_data.get("score")}
+        candidates = evidence_by_field.get(field_name)
+        if isinstance(candidates, (list, tuple)):
+            selected = next(
+                (item for item in candidates if isinstance(item, Mapping) and item.get("selected")),
+                next((item for item in candidates if isinstance(item, Mapping)), None),
+            )
+            if selected:
+                evidence = {
+                    key: selected.get(key)
+                    for key in ("method", "page", "text", "source")
+                    if selected.get(key) not in (None, "")
+                }
+                if evidence:
+                    details["evidence"] = evidence
+        output[str(field_name)] = _compact_mapping(details)
+    return output
+
+
+def _summary_jurisdiction(jurisdiction: Mapping[str, Any]) -> Dict[str, Any]:
+    selected = {
+        key: jurisdiction.get(key)
+        for key in (
+            "country_code",
+            "country_name",
+            "registry_name",
+            "source",
+            "confidence",
+            "subdivision",
+        )
+    }
+    return _compact_mapping(selected)
+
+
+def _summary_extraction(extraction: Mapping[str, Any]) -> Dict[str, Any]:
+    selected = {
+        key: extraction.get(key)
+        for key in (
+            "file_type",
+            "size_bytes",
+            "pages_processed",
+            "total_pages",
+            "truncated",
+        )
+        if key in extraction
+    }
+    return _compact_mapping(selected)
+
+
+def _compact_mapping(value: Mapping[str, Any]) -> Dict[str, Any]:
+    output: Dict[str, Any] = {}
+    for key, item in value.items():
+        compacted = _compact_value(item)
+        if compacted is not None:
+            output[str(key)] = compacted
+    return output
+
+
+def _compact_value(value: Any) -> Any:
+    if value is None or value == "":
+        return None
+    if isinstance(value, Mapping):
+        compacted = _compact_mapping(value)
+        return compacted or None
+    if isinstance(value, (list, tuple)):
+        compacted_items = [_compact_value(item) for item in value]
+        retained = [item for item in compacted_items if item is not None]
+        return retained or None
+    return value
 
 
 def evidence_by_field(items: Iterable[FieldEvidence]) -> Dict[str, list[Dict[str, Any]]]:

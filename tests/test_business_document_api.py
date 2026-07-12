@@ -37,6 +37,22 @@ EXPECTED_RESPONSE_KEYS = {
     "extraction",
     "raw_text",
 }
+SUMMARY_RESPONSE_KEYS = {
+    "success",
+    "message",
+    "response_detail",
+    "document_type",
+    "document_type_confidence",
+    "overall_confidence",
+    "jurisdiction",
+    "data",
+    "field_details",
+    "warnings",
+    "conflicts",
+    "extraction",
+    "raw_text",
+    "request_id",
+}
 
 
 @pytest.fixture
@@ -301,7 +317,7 @@ def test_business_document_endpoint_rejects_missing_upload(client):
     assert response.status_code == 400
     _assert_pretty_json_response(response)
     result = response.get_json()
-    assert EXPECTED_RESPONSE_KEYS.issubset(result)
+    assert set(result) == SUMMARY_RESPONSE_KEYS
     assert result["success"] is False
     assert result["message"] == "No file provided and no document URL provided."
     assert result["request_id"]
@@ -321,7 +337,7 @@ def test_business_document_endpoint_returns_canonical_unhandled_error(client, mo
 
     assert response.status_code == 500
     result = response.get_json()
-    assert EXPECTED_RESPONSE_KEYS.issubset(result)
+    assert set(result) == SUMMARY_RESPONSE_KEYS
     assert result["success"] is False
     assert result["request_id"]
     assert "sensitive internal detail" not in result["message"]
@@ -339,7 +355,7 @@ def test_business_document_endpoint_rejects_oversized_multipart_before_processin
     assert response.status_code == 413
     _assert_pretty_json_response(response)
     result = response.get_json()
-    assert EXPECTED_RESPONSE_KEYS.issubset(result)
+    assert set(result) == SUMMARY_RESPONSE_KEYS
     assert result["success"] is False
     assert result["request_id"]
     assert "request size limit" in result["message"]
@@ -373,7 +389,7 @@ def test_business_document_endpoint_rejects_invalid_upload_with_stable_error(cli
 
     assert response.status_code == 400
     result = response.get_json()
-    assert EXPECTED_RESPONSE_KEYS.issubset(result)
+    assert set(result) == SUMMARY_RESPONSE_KEYS
     assert result["success"] is False
     assert result["document_type"] == "UNKNOWN_BUSINESS_DOCUMENT"
     assert result["raw_text"] == ""
@@ -418,10 +434,23 @@ def test_business_document_endpoint_processes_multipart_hints_and_logs_only_meta
     assert response.status_code == 200
     _assert_pretty_json_response(response)
     result = response.get_json()
-    _assert_stable_success_response(result, text)
+    assert set(result) == SUMMARY_RESPONSE_KEYS
+    assert result["raw_text"] == text.strip()
     assert result["request_id"] == "business-integration-test"
-    assert result["jurisdiction"]["requested_country_code"] == "NGA"
+    assert result["jurisdiction"]["country_code"] == "NGA"
     assert result["document_type"] == "CERTIFICATE_OF_INCORPORATION"
+    assert result["data"]["legal_company_name"] == "SAMPLE GLOBAL SERVICES LIMITED"
+    assert "classification" not in result
+    assert "field_confidence" not in result
+    assert "evidence" not in result
+    assert result["field_details"]["legal_company_name"]["confidence"] > 0
+    assert result["field_details"]["legal_company_name"]["evidence"]["text"]
+    assert all(len(item["evidence"]) == 1 for item in result["data"]["identifiers"])
+    assert "trading_name" not in result["data"]
+    assert "directors" not in result["data"]
+    assert "shareholders" not in result["data"]
+    assert "beneficial_owners" not in result["data"]
+    assert "pages" not in result["extraction"]
     assert calls["header"] == b"\x89PNG\r\n\x1a\n"
     assert calls["is_pdf"] is False
     assert calls["max_pages"] >= 1
@@ -452,7 +481,10 @@ def test_business_document_endpoint_decodes_a_real_png_before_parsing(client, mo
 
     response = client.post(
         "/api/business-document",
-        data={"file": (io.BytesIO(encoded.tobytes()), "certificate.png")},
+        data={
+            "file": (io.BytesIO(encoded.tobytes()), "certificate.png"),
+            "response_detail": "full",
+        },
         content_type="multipart/form-data",
     )
 
@@ -462,3 +494,51 @@ def test_business_document_endpoint_decodes_a_real_png_before_parsing(client, mo
     assert result["extraction"]["file_type"] == "png"
     assert result["extraction"]["pages"][0]["source"] == "image_ocr"
     assert decoded_shapes == [(40, 60, 3)]
+
+
+def test_business_document_endpoint_full_detail_retains_audit_fields(client, monkeypatch):
+    text = _fixture_text("nigeria_cac_certificate.txt")
+    full_result = _parse_fixture("nigeria_cac_certificate.txt")
+    monkeypatch.setattr("src.api.routes.extract_business_document_data", lambda *args, **kwargs: full_result)
+
+    response = client.post(
+        "/api/business-document",
+        data={
+            "file": (io.BytesIO(b"\x89PNG\r\n\x1a\nminimal"), "certificate.png"),
+            "response_detail": "full",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 200
+    result = response.get_json()
+    assert EXPECTED_RESPONSE_KEYS.issubset(result)
+    assert result["raw_text"] == text.strip()
+    assert result["evidence"]["legal_company_name"]
+    assert result["field_confidence"]["legal_company_name"]["score"] > 0
+    assert result["data"]["identifiers"][0]["evidence"]
+
+
+def test_business_document_endpoint_rejects_unknown_response_detail(client):
+    response = client.post(
+        "/api/business-document",
+        data={"response_detail": "verbose"},
+    )
+
+    assert response.status_code == 400
+    result = response.get_json()
+    assert set(result) == SUMMARY_RESPONSE_KEYS
+    assert result["message"] == "response_detail must be either 'summary' or 'full'."
+
+
+def test_business_document_endpoint_rejects_non_string_response_detail(client):
+    response = client.post(
+        "/api/business-document",
+        json={
+            "url": "https://files.example.com/certificate.pdf",
+            "response_detail": {"mode": "full"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["message"] == "response_detail must be either 'summary' or 'full'."

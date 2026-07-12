@@ -13,6 +13,7 @@ The business-document endpoint extracts a reviewable, jurisdiction-aware company
 | `country` | no | ISO alpha-3 code, registered alpha-2 alias, or registered country-name alias |
 | `jurisdiction` | no | State, province, or other subnational incorporation-jurisdiction hint |
 | `document_type` | no | A code from the business-document taxonomy, such as `CERTIFICATE_OF_INCORPORATION` |
+| `response_detail` | no | `summary` (default) or `full` for all audit candidates and diagnostics |
 
 Hints are advisory. Strong document evidence wins over a conflicting hint, and the response records a warning. An unsupported hint is ignored with a warning. A valid document-type hint is used at moderate confidence only when text classification is otherwise unknown.
 
@@ -112,7 +113,90 @@ The main modules have deliberately narrow responsibilities:
 
 No database, object store, or queue is used by this pipeline. Processing is synchronous within the request.
 
-## Canonical response
+## Default summary response
+
+The endpoint returns a concise summary unless `response_detail=full` is supplied. Summary mode:
+
+- omits null, empty, and duplicate business fields;
+- exposes people once in `data.parties`, using `roles` instead of repeating the same person under several role arrays;
+- combines selected field confidence and evidence into `field_details`;
+- retains one exact evidence excerpt inside each identifier;
+- omits classification alternatives, rejected candidates, derived confidence labels, and per-page diagnostics;
+- retains `raw_text`, warnings, conflicts, and extraction totals.
+
+Sanitized summary example:
+
+```json
+{
+  "success": true,
+  "message": null,
+  "response_detail": "summary",
+  "document_type": "CERTIFICATE_OF_INCORPORATION",
+  "document_type_confidence": 1.0,
+  "overall_confidence": 0.91,
+  "jurisdiction": {
+    "country_code": "NGA",
+    "country_name": "Nigeria",
+    "registry_name": "Corporate Affairs Commission",
+    "source": "document_text",
+    "confidence": 1.0
+  },
+  "data": {
+    "legal_company_name": "EXAMPLE HOLDINGS LIMITED",
+    "entity_type": "PRIVATE_COMPANY_LIMITED_BY_SHARES",
+    "country_of_incorporation": "Nigeria",
+    "country_code": "NGA",
+    "identifiers": [
+      {
+        "type": "COMPANY_REGISTRATION_NUMBER",
+        "number_type": "CAC_COMPANY_REGISTRATION_NUMBER",
+        "value": "1234567",
+        "issuing_authority": "Corporate Affairs Commission",
+        "country_code": "NGA",
+        "confidence": 0.96,
+        "evidence": [
+          {
+            "method": "jurisdiction_identifier_pattern",
+            "pattern_label": "CAC company registration number",
+            "page": 1,
+            "text": "COMPANY REGISTRATION NO. 1234567"
+          }
+        ],
+        "source": "jurisdiction_profile",
+        "is_primary": true
+      }
+    ],
+    "issuing_authority": "Corporate Affairs Commission"
+  },
+  "field_details": {
+    "legal_company_name": {
+      "confidence": 0.94,
+      "evidence": {
+        "method": "certificate_or_title_phrase",
+        "page": 1,
+        "text": "hereby certifies that EXAMPLE HOLDINGS LIMITED is this day incorporated"
+      }
+    }
+  },
+  "warnings": [],
+  "conflicts": [],
+  "extraction": {
+    "file_type": "pdf",
+    "size_bytes": 20480,
+    "pages_processed": 1,
+    "total_pages": 1,
+    "truncated": false
+  },
+  "raw_text": "<complete extracted OCR text>",
+  "request_id": "<route-generated-id>"
+}
+```
+
+Missing fields are omitted from summary `data`. Use warnings and application-specific required-field checks rather than assuming omitted values were present in the source.
+
+## Full audit response
+
+Send `response_detail=full` as a form, JSON, or query value to retrieve the complete canonical audit representation. This preserves the original schema for consumers that need every alternative, evidence candidate, derived role list, null placeholder, and page diagnostic.
 
 After shared authentication succeeds, extraction, validation, size-limit, and unhandled-error responses use the same top-level business-document shape. Authentication middleware can return the repository's shorter shared 401 response. The shortened example below is sanitized; omitted canonical data fields are still emitted as `null`, empty lists, or an empty nested object as appropriate.
 
@@ -256,7 +340,7 @@ After shared authentication succeeds, extraction, validation, size-limit, and un
 }
 ```
 
-The canonical `data` object covers legal and trading names, entity type, country and subnational jurisdiction, incorporation/registration dates, addresses, identifiers, issuing authority, document dates and references, status, company parties, capital, activities and objects, contact details, language, and unclassified fields.
+The full canonical `data` object covers legal and trading names, entity type, country and subnational jurisdiction, incorporation/registration dates, addresses, identifiers, issuing authority, document dates and references, status, company parties, capital, activities and objects, contact details, language, and unclassified fields.
 
 ## Confidence, evidence, conflicts, and warnings
 
@@ -264,8 +348,9 @@ Confidence is extraction confidence, not proof that a registry record is authent
 
 - `overall_confidence` combines classification, jurisdiction, key-field, and identifier signals.
 - `classification.confidence` and `jurisdiction.confidence` describe their respective inference stages.
-- `field_confidence` contains the strongest selected evidence score for each extracted field.
-- `evidence` groups all bounded field candidates. `selected` distinguishes the value used in `data` from retained alternatives.
+- Summary `field_details` combines the strongest selected confidence and evidence without repeating the selected value.
+- Full-mode `field_confidence` contains the strongest selected evidence score for each extracted field.
+- Full-mode `evidence` groups all bounded field candidates. `selected` distinguishes the value used in `data` from retained alternatives.
 - Identifier objects carry their own confidence and evidence because several identifier systems may coexist in one document.
 - `conflicts` retains materially different candidates and describes how one was selected. Identifier conflicts use the identifier type/local number type and candidate values.
 - `warnings` are human-readable review signals for missing, uncertain, ambiguous, truncated, future-dated, or conflicting results. They do not necessarily mean the request failed.

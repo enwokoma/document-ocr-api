@@ -18,6 +18,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 from src.api.routes import passport_bp
 from src.core.document_source import get_document_source_settings
 from src.document_ocr.business_document.processor import business_document_error
+from src.document_ocr.business_document.schema import business_document_response_view
 from src.webhook_forwarder.routes import forwarder_bp
 
 document_source_settings = get_document_source_settings()
@@ -87,7 +88,7 @@ def request_entity_too_large(_error):
     if request.path == "/api/business-document":
         result = business_document_error("Uploaded document exceeds the configured request size limit.")
         result["request_id"] = uuid.uuid4().hex
-        return jsonify(result), 413
+        return jsonify(business_document_response_view(result)), 413
     return jsonify({"success": False, "message": "Request body is too large"}), 413
 
 

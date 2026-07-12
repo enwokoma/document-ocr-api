@@ -19,6 +19,10 @@ from src.core.document_source import DocumentSource, DocumentSourceError, resolv
 from src.countries.registry import get_country_profile, list_country_profiles, serialize_country_profile
 from src.document_ocr.bank_statement.processor import extract_bank_statement_data
 from src.document_ocr.business_document.processor import business_document_error, extract_business_document_data
+from src.document_ocr.business_document.schema import (
+    BUSINESS_RESPONSE_DETAILS,
+    business_document_response_view,
+)
 from src.document_ocr.drivers_license.processor import extract_drivers_license_data
 from src.document_ocr.nin.processor import extract_nin_from_image, nin_extraction_error
 from src.document_ocr.passport.processor import extract_mrz_from_image
@@ -352,6 +356,13 @@ def extract_business_document():
         type: string
         required: false
         description: Optional business-document taxonomy hint
+      - name: response_detail
+        in: formData
+        type: string
+        enum: [summary, full]
+        required: false
+        default: summary
+        description: Concise response by default; full includes all audit candidates and diagnostics
       - name: file
         in: formData
         type: file
@@ -373,9 +384,19 @@ def extract_business_document():
     started = time.perf_counter()
     request_id = _request_id()
     try:
+        response_detail = get_business_response_detail()
+    except ValueError as exc:
+        return _business_document_route_error(str(exc), request_id, started)
+    try:
         source = resolve_document_source(request)
     except DocumentSourceError as exc:
-        return _business_document_route_error(exc.message, request_id, started, status_code=_source_error_status(exc))
+        return _business_document_route_error(
+            exc.message,
+            request_id,
+            started,
+            status_code=_source_error_status(exc),
+            response_detail=response_detail,
+        )
 
     country_hint = get_optional_hint("country", uppercase=True)
     jurisdiction_hint = get_optional_hint("jurisdiction")
@@ -405,6 +426,7 @@ def extract_business_document():
                     "country_hint_present": country_hint is not None,
                     "jurisdiction_hint_present": jurisdiction_hint is not None,
                     "document_type_hint_present": document_type_hint is not None,
+                    "response_detail": response_detail,
                     "document_type": result.get("document_type"),
                     "country_code": result.get("jurisdiction", {}).get("country_code"),
                     "success": result.get("success"),
@@ -414,7 +436,7 @@ def extract_business_document():
                 ensure_ascii=False,
             ),
         )
-        return jsonify(result), status_code
+        return jsonify(business_document_response_view(result, detail=response_detail)), status_code
     except Exception:
         logger.error(
             "business_document_unhandled_exception %s",
@@ -425,6 +447,7 @@ def extract_business_document():
                     "country_hint_present": country_hint is not None,
                     "jurisdiction_hint_present": jurisdiction_hint is not None,
                     "document_type_hint_present": document_type_hint is not None,
+                    "response_detail": response_detail,
                     "duration_ms": round((time.perf_counter() - started) * 1000, 2),
                 },
                 ensure_ascii=False,
@@ -432,7 +455,7 @@ def extract_business_document():
         )
         result = business_document_error("Unhandled exception while processing the business document.")
         result["request_id"] = request_id
-        return jsonify(result), 500
+        return jsonify(business_document_response_view(result, detail=response_detail)), 500
 
 
 @passport_bp.route("/countries", methods=["GET"])
@@ -493,13 +516,31 @@ def get_request_value(name: str) -> Any:
     return request.args.get(name)
 
 
+def get_business_response_detail() -> str:
+    """Return the requested business response detail level."""
+    value = get_request_value("response_detail")
+    if value is not None and not isinstance(value, str):
+        raise ValueError("response_detail must be either 'summary' or 'full'.")
+    detail = str(value or "summary").strip().lower()
+    if detail not in BUSINESS_RESPONSE_DETAILS:
+        raise ValueError("response_detail must be either 'summary' or 'full'.")
+    return detail
+
+
 def _request_id():
     """Return a bounded caller correlation ID or generate one for business OCR logs."""
     supplied = request.headers.get("X-Request-Id") or request.headers.get("X-Correlation-Id")
     return supplied.strip()[:128] if isinstance(supplied, str) and supplied.strip() else uuid.uuid4().hex
 
 
-def _business_document_route_error(message, request_id, started, *, status_code=400):
+def _business_document_route_error(
+    message,
+    request_id,
+    started,
+    *,
+    status_code=400,
+    response_detail="summary",
+):
     """Return and log a canonical business-document request error."""
     result = business_document_error(message)
     result["request_id"] = request_id
@@ -514,7 +555,7 @@ def _business_document_route_error(message, request_id, started, *, status_code=
             }
         ),
     )
-    return jsonify(result), status_code
+    return jsonify(business_document_response_view(result, detail=response_detail)), status_code
 
 
 def _source_error_status(error: DocumentSourceError) -> int:

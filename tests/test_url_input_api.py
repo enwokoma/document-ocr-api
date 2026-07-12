@@ -107,6 +107,7 @@ def test_business_document_route_accepts_json_url_and_hints(client, monkeypatch)
 
     assert response.status_code == 200
     _assert_pretty_json(response)
+    assert response.get_json()["response_detail"] == "summary"
     assert calls == {
         "bytes": PDF_BYTES,
         "country_code": "NGA",
@@ -116,6 +117,43 @@ def test_business_document_route_accepts_json_url_and_hints(client, monkeypatch)
         "is_pdf": True,
     }
     assert response.get_json()["request_id"]
+
+
+def test_business_document_json_url_can_request_full_detail(client, monkeypatch):
+    monkeypatch.setattr(
+        document_source,
+        "_download_document_url",
+        lambda *args, **kwargs: (io.BytesIO(PDF_BYTES), len(PDF_BYTES), "pdf", "registry.pdf"),
+    )
+    monkeypatch.setattr(
+        "src.api.routes.extract_business_document_data",
+        lambda *args, **kwargs: {
+            "success": True,
+            "document_type": "COMPANY_REGISTRY_EXTRACT",
+            "classification": {"confidence": 0.9, "alternatives": [{"document_type": "OTHER"}]},
+            "jurisdiction": {},
+            "data": {},
+            "field_confidence": {},
+            "evidence": {},
+            "warnings": [],
+            "conflicts": [],
+            "extraction": {},
+            "raw_text": "synthetic registry text",
+            "overall_confidence": 0.8,
+        },
+    )
+
+    response = client.post(
+        "/api/business-document",
+        json={
+            "url": "https://files.example.com/company.pdf",
+            "response_detail": "full",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["classification"]["alternatives"] == [{"document_type": "OTHER"}]
+    assert "response_detail" not in response.get_json()
 
 
 def test_document_url_alias_is_accepted_in_multipart_form(client, monkeypatch):
