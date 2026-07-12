@@ -1,6 +1,6 @@
 # Document OCR API
 
-A Flask API for extracting structured data from identity documents, financial records, and utility proof-of-address documents. The project currently supports passport MRZ extraction, Nigerian NIN card/slip parsing, bank statement parsing, utility bill/receipt parsing, and an optional generic webhook forwarder.
+A Flask API for extracting structured data from identity documents, business-registration documents, financial records, and utility proof-of-address documents. The project supports passport MRZ extraction, Nigerian NIN card/slip parsing, jurisdiction-aware business-document extraction, bank statement parsing, utility bill/receipt parsing, and an optional generic webhook forwarder.
 
 The codebase is organized so new document types and country-specific rules can be added without reshaping the whole service.
 
@@ -14,6 +14,7 @@ The codebase is organized so new document types and country-specific rules can b
 - Swagger UI at `/api-docs`.
 - HMAC request-signing utilities for production authentication.
 - OCR backend abstraction with RapidOCR first and optional EasyOCR fallback.
+- Business-document classification, jurisdiction detection, typed identifiers, field-level confidence/evidence, conflict reporting, and generic fallback extraction.
 
 ## Project Structure
 
@@ -35,6 +36,7 @@ document-ocr-api/
       ocr_engine.py
     document_ocr/
       bank_statement/
+      business_document/
       drivers_license/
       nin/
       passport/
@@ -85,6 +87,12 @@ FORWARDER_TARGET_2_URL=https://endpoint2.example.com/webhook
 FORWARDER_TARGET_3_URL=https://endpoint3.example.com/webhook
 
 ENABLE_EASYOCR_FALLBACK=0
+
+BUSINESS_DOCUMENT_MAX_PAGES=20
+BUSINESS_DOCUMENT_MAX_UPLOAD_BYTES=20971520
+BUSINESS_DOCUMENT_MAX_IMAGE_PIXELS=25000000
+BUSINESS_DOCUMENT_MAX_PAGE_TEXT_CHARS=100000
+BUSINESS_DOCUMENT_COMPARE_RENDERED_PDF_TEXT=1
 ```
 
 `FORWARDER_*` settings are only required if `/api/webhooks/forward` is used.
@@ -226,6 +234,29 @@ For example, `/api/voter-id` calls `src/document_ocr/voter_id/processor.py`.
 That processor calls `src/document_ocr/text_extraction.py` to convert the upload
 into text, then dispatches to `src/countries/nigeria/voter_id.py` or
 `src/countries/ghana/voter_id.py`.
+
+### Business-document extraction
+
+```http
+POST /api/business-document
+```
+
+Form data:
+
+- `file`: PDF, JPEG, PNG, TIFF, BMP, or WebP business document
+- `country` (optional): country code or registered country alias, for example `NGA` or `USA`
+- `jurisdiction` (optional): state, province, or other subnational jurisdiction hint
+- `document_type` (optional): taxonomy code, for example `CERTIFICATE_OF_INCORPORATION`
+
+The response uses one global schema for certificates, registry extracts, status reports, constitutional documents, tax certificates, and unknown business records. It includes typed registration/tax identifiers, confidence and evidence by field, warnings and retained conflicts, page-extraction diagnostics, raw OCR text, and unclassified label/value fields. Nigeria and United States profiles are built in; unknown jurisdictions use the generic fallback.
+
+```bash
+curl -X POST http://localhost:5005/api/business-document \
+  -F "file=@certificate.pdf" \
+  -F "country=NGA"
+```
+
+See [Business-document OCR](docs/business_document_ocr.md) for the complete response contract, supported taxonomy, profile-extension example, limits, privacy guidance, and known limitations.
 
 ### Country Metadata
 
@@ -388,11 +419,21 @@ For local development, install the test dependencies with:
 pip install -r requirements-dev.txt
 ```
 
-The included tests are smoke tests for route availability and basic error behavior. Full OCR accuracy tests should use controlled sample documents.
+Run the complete local quality gate with:
+
+```bash
+ruff format --check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+ruff check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+mypy
+python -m pytest tests -v
+```
+
+Tests cover route behavior, parser rules, country profiles, page-aware text extraction, and legacy endpoint regressions using sanitized synthetic fixtures. OCR accuracy against real-world layouts still requires a controlled, legally usable document corpus.
 
 ## Security Notes
 
 - The API processes uploads in memory and does not persist documents by default.
+- Business-document responses intentionally contain raw OCR text and evidence; treat them as sensitive and do not log them.
 - Use a strong `OCR_SECRET_KEY` before production deployment.
 - Re-enable HMAC verification before public exposure.
 - Put rate limiting and upload-size limits at the reverse proxy or gateway layer.
