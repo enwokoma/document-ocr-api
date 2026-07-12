@@ -122,6 +122,14 @@ python app.py
 
 The API runs on `http://localhost:5005`.
 
+For development on Flask's conventional port `5000`, use reload mode so application changes are picked up:
+
+```powershell
+python -m flask --app app --debug run --port 5000
+```
+
+If a server was already running before an update, stop it with `Ctrl+C` and start it again. `flask run` without `--debug` keeps the previously imported application in memory, which can make responses appear unchanged after the source has been updated.
+
 Swagger UI is available at:
 
 ```text

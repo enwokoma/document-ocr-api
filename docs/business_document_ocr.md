@@ -65,6 +65,20 @@ The shared source resolver accepts PDF, JPEG, PNG, TIFF, BMP, and WebP signature
 
 The HTTP route adds a `request_id` to the processor response. JSON indentation is configured application-wide, so business-document, legacy OCR, metadata, health, webhook, and JSON error responses are all human-readable.
 
+If `curl.exe` still displays a compact one-line response after updating the repository, the running Flask process is stale. Restart it from the repository root with reload enabled:
+
+```powershell
+python -m flask --app app --debug run --port 5000
+```
+
+The health endpoint should then render across multiple lines:
+
+```powershell
+curl.exe "http://localhost:5000/"
+```
+
+Reload mode is for local development. Use the documented production server command when deploying, and restart application workers as part of each deployment.
+
 ## Architecture and processing flow
 
 ```text
