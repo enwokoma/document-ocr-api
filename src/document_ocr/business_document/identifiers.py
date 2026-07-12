@@ -541,6 +541,15 @@ def _resolve_type_ambiguity(
             continue
         winner = max(same_value, key=_candidate_rank)
         resolved.append(winner)
+        generic_losers = [item for item in same_value if item is not winner]
+        if (
+            winner.source == "jurisdiction_profile"
+            and winner.number_type
+            and generic_losers
+            and all(item.source == "generic_fallback" for item in generic_losers)
+            and winner.confidence >= max(item.confidence for item in generic_losers) + 0.1
+        ):
+            continue
         warnings.append(
             f"Identifier {winner.normalized_value} matched multiple types "
             f"({', '.join(sorted(types))}); classified as {winner.identifier_type}."

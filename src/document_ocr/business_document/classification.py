@@ -160,6 +160,12 @@ _SIGNATURES = (
         high_score=12.0,
         rules=(
             MatchRule(
+                "memorandum and articles headings",
+                r"(?=.*\bMEMORANDUM\s+OF\s+ASSOCIATION\b)(?=.*\bARTICLES\s+OF\s+ASSOCIATION\b)",
+                5.0,
+                True,
+            ),
+            MatchRule(
                 "memorandum and articles of association",
                 r"\bMEMORANDUM\s+(?:AND|&)\s+ARTICLES\s+OF\s+ASSOCIATION\b",
                 9.0,
@@ -258,8 +264,19 @@ def classify_business_document(text: str) -> ClassificationResult:
     best_confidence = float(best["confidence"])
     best_score = float(best["raw_score"])
     minimum_score = float(best["minimum_score"])
+    comparison_candidates = scored[1:]
+    if best["document_type"] == "MEMORANDUM_AND_ARTICLES_OF_ASSOCIATION" and any(
+        term in {"memorandum and articles headings", "memorandum and articles of association"}
+        for term in best["matched_terms"]
+    ):
+        component_types = {"MEMORANDUM_OF_ASSOCIATION", "ARTICLES_OF_ASSOCIATION"}
+        comparison_candidates = [item for item in comparison_candidates if item["document_type"] not in component_types]
     runner_up = next(
-        (item for item in scored[1:] if item["document_type"] != best["document_type"] and float(item["confidence"]) >= 0.40),
+        (
+            item
+            for item in comparison_candidates
+            if item["document_type"] != best["document_type"] and float(item["confidence"]) >= 0.40
+        ),
         None,
     )
     ambiguous = bool(runner_up and best_confidence - float(runner_up["confidence"]) <= 0.08)
@@ -269,7 +286,7 @@ def classify_business_document(text: str) -> ClassificationResult:
             document_type=UNKNOWN_BUSINESS_DOCUMENT,
             confidence=min(0.39, best_confidence),
             matched_terms=tuple(best["matched_terms"]),
-            alternatives=tuple(_serialize_alternatives(scored[:3])),
+            alternatives=tuple(_serialize_alternatives([best, *comparison_candidates[:2]])),
             ambiguous=ambiguous,
         )
 
@@ -277,7 +294,7 @@ def classify_business_document(text: str) -> ClassificationResult:
         document_type=str(best["document_type"]),
         confidence=float(best["confidence"]),
         matched_terms=tuple(best["matched_terms"]),
-        alternatives=tuple(_serialize_alternatives(scored[1:4])),
+        alternatives=tuple(_serialize_alternatives(comparison_candidates[:3])),
         ambiguous=ambiguous,
     )
 

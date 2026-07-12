@@ -48,11 +48,19 @@ _JOINED_LABELS = {
     "REGISTEREDOFFICE": "REGISTERED OFFICE",
     "HEADOFFICEADDRESS": "HEAD OFFICE ADDRESS",
     "HEAD_OFFICEADDRESS": "HEAD OFFICE ADDRESS",
+    "COMPANYTYPE": "COMPANY TYPE",
+    "ENTITYTYPE": "ENTITY TYPE",
+    "FIRSTNAME": "FIRST NAME",
+    "OTHERNAME": "OTHER NAME",
+    "FULLNAME": "FULL NAME",
     "COMPANYSTATUS": "COMPANY STATUS",
     "ENTITYSTATUS": "ENTITY STATUS",
     "SHARECAPITAL": "SHARE CAPITAL",
     "NATUREOFBUSINESS": "NATURE OF BUSINESS",
     "PRINCIPALACTIVITY": "PRINCIPAL ACTIVITY",
+    "TOTALNUMBEROFSHARES": "TOTAL NUMBER OF SHARES",
+    "SHAREPERCENTAGE": "SHARE PERCENTAGE",
+    "PERSONSWITHSIGNIFICANTCONTROL": "PERSONS WITH SIGNIFICANT CONTROL",
     "TAXIDENTIFICATIONNUMBER": "TAX IDENTIFICATION NUMBER",
 }
 
@@ -75,6 +83,13 @@ def normalize_business_text(text: str, *, preserve_columns: bool = False) -> str
         else:
             line = re.sub(r"[|]+", " ", raw_line)
             line = re.sub(r"[ \t\f\v]+", " ", line).strip()
+        head_office_label = re.match(
+            r"^HEAD[\s_]*OFFICE[\s_]*ADDRESS(?=$|[\s:#.\-_]|\d)",
+            line,
+            flags=re.IGNORECASE,
+        )
+        if head_office_label:
+            line = "HEAD OFFICE ADDRESS " + line[head_office_label.end() :].lstrip(" :#.-_")
         if not line:
             continue
         compact_upper = re.sub(r"[^A-Z_]", "", line.upper())
@@ -163,6 +178,19 @@ def normalize_entity_type(value: str) -> Optional[str]:
     upper = re.sub(r"[^A-Z0-9]+", " ", str(value or "").upper()).strip()
     if not upper:
         return None
+    compact = upper.replace(" ", "")
+    joined_rules = (
+        ("PUBLIC_COMPANY_LIMITED_BY_SHARES", "PUBLICCOMPANYLIMITEDBYSHARES"),
+        ("PRIVATE_COMPANY_LIMITED_BY_SHARES", "PRIVATECOMPANYLIMITEDBYSHARES"),
+        ("COMPANY_LIMITED_BY_GUARANTEE", "COMPANYLIMITEDBYGUARANTEE"),
+        ("LIMITED_LIABILITY_COMPANY", "LIMITEDLIABILITYCOMPANY"),
+        ("LIMITED_LIABILITY_PARTNERSHIP", "LIMITEDLIABILITYPARTNERSHIP"),
+        ("UNLIMITED_COMPANY", "UNLIMITEDCOMPANY"),
+        ("INCORPORATED_TRUSTEE", "INCORPORATEDTRUSTEE"),
+    )
+    for code, phrase in joined_rules:
+        if phrase in compact:
+            return code
     rules = (
         ("COMPANY_LIMITED_BY_GUARANTEE", r"\b(?:COMPANY\s+)?LIMITED\s+BY\s+GUARANTEE\b|\bLTD\s*/?\s*GTE\b"),
         (

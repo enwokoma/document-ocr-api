@@ -168,18 +168,32 @@ def parse_core_business_fields(
 
     email = _extract_labeled_value(
         lines,
-        labels=(r"REGISTERED\s+EMAIL(?:\s+ADDRESS)?", r"COMPANY\s+EMAIL", r"EMAIL(?:\s+ADDRESS)?"),
+        labels=(r"REGISTERED\s+EMAIL(?:\s+ADDRESS)?", r"COMPANY\s+EMAIL"),
         validator=lambda value: bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value.strip())),
         method="email_label",
     )
+    if not email:
+        email = _extract_labeled_value(
+            _company_details_scope(lines),
+            labels=(r"EMAIL(?:\s+ADDRESS)?",),
+            validator=lambda value: bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value.strip())),
+            method="email_label",
+        )
     _add_match(data, evidence, "contact_email", email, page_texts)
 
     phone = _extract_labeled_value(
         lines,
-        labels=(r"COMPANY\s+PHONE", r"PHONE(?:\s+NUMBER)?", r"TELEPHONE", r"MOBILE"),
+        labels=(r"COMPANY\s+PHONE", r"REGISTERED\s+PHONE(?:\s+NUMBER)?"),
         validator=lambda value: len(re.sub(r"\D", "", value)) >= 7,
         method="phone_label",
     )
+    if not phone:
+        phone = _extract_labeled_value(
+            _company_details_scope(lines),
+            labels=(r"PHONE(?:\s+NUMBER)?", r"TELEPHONE", r"MOBILE"),
+            validator=lambda value: len(re.sub(r"\D", "", value)) >= 7,
+            method="phone_label",
+        )
     _add_match(data, evidence, "contact_phone", phone, page_texts)
 
     nature = _extract_labeled_value(
@@ -486,6 +500,19 @@ def _extract_labeled_value(
         if value and validator(value):
             return _ValueMatch(value, " | ".join(excerpt_lines), method, confidence)
     return None
+
+
+def _company_details_scope(lines: Sequence[str]) -> Sequence[str]:
+    """Exclude officer/owner sections when resolving unqualified contacts."""
+    for index, line in enumerate(lines):
+        if re.match(
+            r"^(?:PARTICULARS\s+OF\s+)?(?:DIRECTORS?|SHAREHOLDERS?|SUBSCRIBERS?|"
+            r"BENEFICIAL\s+OWNERS?|PERSONS?\s+WITH\s+SIGNIFICANT\s+CONTROL|PSC\s+DETAILS|SECRETARY)\b",
+            line.strip(),
+            flags=re.IGNORECASE,
+        ):
+            return lines[:index]
+    return lines
 
 
 def _add_match(

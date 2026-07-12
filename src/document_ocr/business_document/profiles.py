@@ -400,6 +400,13 @@ NIGERIA_PROFILE = BusinessJurisdictionProfile(
     ),
     registration_patterns=(
         RegistrationPattern(
+            r"\bCOMPANY\s+REGISTRATION\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*(?P<number>\d{4,12})\b",
+            "CAC_COMPANY_REGISTRATION_NUMBER",
+            0.96,
+            IdentifierType.COMPANY_REGISTRATION_NUMBER,
+            "CAC company registration number",
+        ),
+        RegistrationPattern(
             r"\b(?P<prefix>RC)\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*(?P<number>\d{4,12})\b",
             "CAC_RC",
             0.97,
@@ -435,7 +442,7 @@ NIGERIA_PROFILE = BusinessJurisdictionProfile(
             "CAC limited-partnership number",
         ),
         RegistrationPattern(
-            r"\b(?:REGISTRATION|REGISTERED)\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*(?P<number>\d{4,12})\b",
+            r"\b(?<!COMPANY\s)(?:REGISTRATION|REGISTERED)\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*(?P<number>\d{4,12})\b",
             "CAC_REGISTRATION_NUMBER",
             0.88,
             IdentifierType.REGISTRY_NUMBER,

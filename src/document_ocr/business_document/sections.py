@@ -51,6 +51,8 @@ _NAME_STOP_WORDS = {
     "DIRECTOR",
     "DIRECTORS",
     "EMAIL",
+    "FIRST",
+    "FORENAME",
     "GENDER",
     "IDENTIFICATION",
     "NAME",
@@ -58,6 +60,7 @@ _NAME_STOP_WORDS = {
     "NATURE",
     "NUMBER",
     "OCCUPATION",
+    "OTHER",
     "PARTICULARS",
     "PHONE",
     "ROLE",
@@ -67,6 +70,7 @@ _NAME_STOP_WORDS = {
     "SHARES",
     "STATUS",
     "SUBSCRIBER",
+    "SURNAME",
     "TRUSTEE",
     "TYPE",
 }
@@ -108,6 +112,17 @@ _CURRENCY_CODES = {
     "ZAR": "ZAR",
     "CAD": "CAD",
     "AUD": "AUD",
+}
+
+_COUNTRY_DEFAULT_CURRENCIES = {
+    "AUS": "AUD",
+    "CAN": "CAD",
+    "GHA": "GHS",
+    "GBR": "GBP",
+    "KEN": "KES",
+    "NGA": "NGN",
+    "USA": "USD",
+    "ZAF": "ZAR",
 }
 
 
@@ -181,7 +196,7 @@ def extract_business_objects(text: str) -> tuple[list[str], str]:
     start = None
     inline_value = ""
     heading_pattern = re.compile(
-        r"^(?:"
+        r"^(?:\(?(?:\d+|[IVX]+)[.)]\s*)?(?:"
         r"(?:THE\s+)?OBJECTS?\s+(?:FOR\s+WHICH\s+THE\s+COMPANY\s+IS\s+ESTABLISHED|OF\s+THE\s+COMPANY)"
         r"\s*(?:ARE|IS)?\s*[:.-]?\s*(.*)"
         r"|(?:THE\s+)?OBJECTS?\s+(?:ARE|IS)\s*[:.-]?\s*(.*)"
@@ -202,9 +217,10 @@ def extract_business_objects(text: str) -> tuple[list[str], str]:
     block_lines = [inline_value] if inline_value else []
     for line in lines[start + 1 : start + 80]:
         if re.match(
-            r"^(?:(?:\d+[.)]\s*)?(?:LIABILITY\s+OF|THE\s+LIABILITY|LIABILITY\b|SHARE\s+CAPITAL|"
-            r"CAPITAL\s+OF|ARTICLES\s+OF|SUBSCRIBERS?|WE\s+THE\s+SEVERAL|REGISTERED\s+OFFICE|"
-            r"DIRECTORS?|SHAREHOLDERS?|CERTIFICATION|DECLARATION|SIGNATURES?|IN\s+WITNESS))",
+            r"^(?:(?:\d+|[IVX]+)[.)]\s*)?(?:LIABILITY\s+OF|THE\s+LIABILITY|LIABILITY\b|"
+            r"(?:THE\s+)?(?:NOMINAL\s+)?SHARE\s+CAPITAL|CAPITAL\s+OF|ARTICLES\s+OF|"
+            r"SUBSCRIBERS?|WE\s+THE\s+SEVERAL|REGISTERED\s+OFFICE|"
+            r"DIRECTORS?|SHAREHOLDERS?|CERTIFICATION|DECLARATION|SIGNATURES?|IN\s+WITNESS)",
             line,
             flags=re.IGNORECASE,
         ):
@@ -252,7 +268,8 @@ def extract_share_capital(text: str, *, country_code: Optional[str] = None) -> t
         ),
         (
             "authorized_amount",
-            rf"\b(?:AUTHORIZED|AUTHORISED|NOMINAL)\s+(?:SHARE\s+)?CAPITAL\s*(?:IS|OF|:|-)?\s*{currency}\s*{amount}",
+            rf"\b(?:AUTHORIZED|AUTHORISED|NOMINAL)\s+(?:SHARE\s+)?CAPITAL"
+            rf"(?:\s+OF\s+THE\s+COMPANY)?\s*(?:IS|OF|:|-)?\s*{currency}\s*{amount}",
         ),
         (
             "paid_up_amount",
@@ -305,6 +322,10 @@ def extract_share_capital(text: str, *, country_code: Optional[str] = None) -> t
         result["currency_candidates"] = unique_currencies
     if raw_currency_values and not result.get("currency"):
         result["currency_raw"] = raw_currency_values[0]
+    if not result.get("currency") and not result.get("currency_raw") and country_code:
+        default_currency = _COUNTRY_DEFAULT_CURRENCIES.get(country_code.upper())
+        if default_currency:
+            result["currency"] = default_currency
 
     start = min(match.start() for _, match in matches)
     end = max(match.end() for _, match in matches)
@@ -336,6 +357,10 @@ def extract_parties(text: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
     parties: list[dict[str, Any]] = []
     excerpts: dict[str, str] = {}
 
+    cac_parties, cac_excerpts = _extract_cac_role_records(lines)
+    parties.extend(cac_parties)
+    excerpts.update(cac_excerpts)
+
     direct_pattern = re.compile(
         r"^(?P<role>DIRECTOR|SHAREHOLDER|BENEFICIAL\s+OWNER|PERSON\s+WITH\s+SIGNIFICANT\s+CONTROL|PSC|"
         r"COMPANY\s+SECRETARY|SECRETARY|SUBSCRIBER|PROPRIETOR|PARTNER|TRUSTEE)\s*[:.-]\s*(?P<name>.+)$",
@@ -353,9 +378,13 @@ def extract_parties(text: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
 
     for role, heading_patterns in _ROLE_HEADINGS.items():
         for block, excerpt in _find_role_blocks(lines, heading_patterns):
+            if not _looks_like_party_list(block, role):
+                continue
             excerpts[role] = " | ".join(filter(None, (excerpts.get(role), excerpt)))[:1200]
             current_party: Optional[dict[str, Any]] = None
             for line in block:
+                if _looks_like_role_prose(line, role):
+                    break
                 if _is_party_metadata_line(line):
                     if current_party is not None:
                         _apply_party_metadata(current_party, line)
@@ -367,6 +396,152 @@ def extract_parties(text: str) -> tuple[list[dict[str, Any]], dict[str, str]]:
                 current_party = party
 
     return _merge_parties(parties), excerpts
+
+
+_CAC_ROLE_RECORD_RE = re.compile(
+    r"^\s*(?:(?:\d+(?:\.[A-Z]|[A-Z]|[.)])?|[A-Z]\d+)\s+)?"
+    r"ROLE\s*TYPE\s*[:.-]?\s*(?P<role>[A-Z ]+)\s*$",
+    re.IGNORECASE,
+)
+
+_CAC_NAME_LABELS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("full_name", (r"FULL\s+NAME", r"NAME")),
+    ("company_name", (r"COMPANY\s+NAME", r"CORPORATE\s+NAME")),
+    ("surname", (r"SURNAME", r"LAST\s+NAME")),
+    ("first_name", (r"FIRST\s+NAME", r"FORENAME")),
+    ("other_name", (r"OTHER\s+NAMES?", r"MIDDLE\s+NAMES?")),
+)
+
+
+def _extract_cac_role_records(lines: Sequence[str]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Extract bounded CAC status-report records headed by ``ROLE TYPE``."""
+    starts = [(index, match) for index, line in enumerate(lines) if (match := _CAC_ROLE_RECORD_RE.match(line))]
+    parties: list[dict[str, Any]] = []
+    excerpts: dict[str, str] = {}
+    for position, (start, match) in enumerate(starts):
+        role = _normalize_cac_role(match.group("role"))
+        if role is None:
+            continue
+        end = starts[position + 1][0] if position + 1 < len(starts) else len(lines)
+        record = list(lines[start + 1 : min(end, start + 61)])
+        party = _party_from_cac_record(record, role)
+        if not party:
+            continue
+        parties.append(party)
+        excerpt_lines = [lines[start]] + record[:12]
+        excerpts[role] = " | ".join(filter(None, (excerpts.get(role), " | ".join(excerpt_lines))))[:1200]
+    return parties, excerpts
+
+
+def _normalize_cac_role(value: str) -> Optional[str]:
+    compact = re.sub(r"[^A-Z]", "", str(value or "").upper())
+    mapping = {
+        "DIRECTOR": "DIRECTOR",
+        "SECRETARY": "SECRETARY",
+        "COMPANYSECRETARY": "SECRETARY",
+        "SECRETARYCOMPANY": "SECRETARY",
+        "SHAREHOLDER": "SHAREHOLDER",
+        "SUBSCRIBER": "SUBSCRIBER",
+        "BENEFICIALOWNER": "BENEFICIAL_OWNER",
+        "PSC": "PERSON_WITH_SIGNIFICANT_CONTROL",
+        "PERSONWITHSIGNIFICANTCONTROL": "PERSON_WITH_SIGNIFICANT_CONTROL",
+    }
+    return mapping.get(compact)
+
+
+def _party_from_cac_record(lines: Sequence[str], role: str) -> Optional[dict[str, Any]]:
+    name_parts: dict[str, str] = {}
+    for field, labels in _CAC_NAME_LABELS:
+        value = _record_label_value(lines, labels)
+        if value:
+            name_parts[field] = value
+
+    name = name_parts.get("company_name") or name_parts.get("full_name")
+    if not name:
+        # Preserve the registry's labelled surname/given/other-name order rather
+        # than imposing a jurisdiction-specific display-name convention.
+        name = " ".join(filter(None, (name_parts.get("surname"), name_parts.get("first_name"), name_parts.get("other_name"))))
+    if not name or not _looks_like_party_name(name):
+        return None
+
+    party: dict[str, Any] = {"name": name, "roles": [role]}
+    for line in lines:
+        _apply_party_metadata(party, line)
+    return party
+
+
+def _record_label_value(lines: Sequence[str], labels: Sequence[str]) -> Optional[str]:
+    label_pattern = "|".join(f"(?:{label})" for label in labels)
+    for index, line in enumerate(lines):
+        match = re.match(rf"^\s*(?:{label_pattern})(?:\s*[:#.-]\s*|\s+)(.*)$", line, flags=re.IGNORECASE)
+        if not match:
+            continue
+        value = match.group(1).strip(" |:;,.-")
+        if not value and index + 1 < len(lines):
+            value = lines[index + 1].strip(" |:;,.-")
+        value = " ".join(value.split())[:140]
+        if not value or value.upper() in {"NIL", "NONE", "N/A", "NA", "NOT APPLICABLE"}:
+            continue
+        if "@" in value or re.search(r"\d", value):
+            continue
+        return value
+    return None
+
+
+def _looks_like_party_list(block: Sequence[str], role: str) -> bool:
+    if any(_CAC_ROLE_RECORD_RE.match(line) for line in block[:12]):
+        return False
+    for line in block[:12]:
+        if _is_party_metadata_line(line) or _looks_like_party_table_header(line):
+            continue
+        if _looks_like_role_prose(line, role):
+            return False
+        if _party_from_line(line, role):
+            return True
+    return False
+
+
+def _looks_like_party_table_header(line: str) -> bool:
+    upper = re.sub(r"[^A-Z]+", " ", str(line or "").upper()).strip()
+    words = set(upper.split())
+    header_words = {
+        "ADDRESS",
+        "FULL",
+        "NAME",
+        "NAMES",
+        "NUMBER",
+        "ROLE",
+        "SHAREHOLDER",
+        "SHARES",
+        "SIGNATURE",
+        "STATUS",
+        "SUBSCRIBER",
+        "SUBSCRIBERS",
+        "TYPE",
+    }
+    return bool(words) and words.issubset(header_words)
+
+
+def _looks_like_role_prose(line: str, role: str) -> bool:
+    candidate = " ".join(str(line or "").split())
+    upper = candidate.upper()
+    if not candidate:
+        return False
+    if re.match(r"^(?:[\u2022*]|\(?\d+[.)])\s*", candidate):
+        return True
+    if re.match(r"^(?:ALTERNATE\s+)?DIRECTORS?\b", upper) and role == "DIRECTOR":
+        return True
+    if len(candidate.split()) > 12 or candidate.endswith((".", ";")):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:SUBJECT\s+TO|GENERAL\s+AUTHORITY|TAKE\s+DECISIONS?|DECISION-MAKING|MEETINGS?|"
+            r"QUORUM|DELEGAT(?:E|ION)|APPOINTING|APPOINTMENT|REMUNERATION|EXPENSES?|"
+            r"CORPORATE\s+AFFAIRS\s+COMMISSION|IS\s+RESPONSIBLE|ARE\s+RESPONSIBLE|"
+            r"MAY\s+APPOINT|MUST\s+ENSURE)\b",
+            upper,
+        )
+    )
 
 
 def _find_role_blocks(lines: Sequence[str], heading_patterns: Sequence[str]) -> list[tuple[list[str], str]]:

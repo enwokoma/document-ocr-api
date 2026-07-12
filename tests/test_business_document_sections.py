@@ -78,6 +78,18 @@ REGISTERED OFFICE
     assert objects == ["To provide software services", "To carry on business consulting"]
 
 
+def test_numbered_memorandum_objects_heading_is_supported():
+    text = """3. The objects for which the Company is established are:
+(a) To provide software services
+(b) To carry on business consulting
+4. The nominal share capital of the Company is ₦1,000,000
+"""
+
+    objects, _ = extract_business_objects(text)
+
+    assert objects == ["To provide software services", "To carry on business consulting"]
+
+
 def test_small_capital_and_one_share_are_supported():
     capital, _ = extract_share_capital("Share capital USD 100 divided into 1 share of USD 100 each")
 
@@ -121,6 +133,99 @@ def test_multiple_share_classes_are_preserved():
             "currency": "USD",
         },
     ]
+
+
+def test_numbered_nominal_capital_accepts_real_naira_symbol():
+    capital, _ = extract_share_capital(
+        "4. The nominal share capital of the Company is ₦1,000,000 divided into 1,000,000 ordinary shares of ₦1 each",
+        country_code="NGA",
+    )
+
+    assert capital["authorized_amount"] == "1000000"
+    assert capital["amount"] == "1000000"
+    assert capital["currency"] == "NGN"
+    assert capital["share_count"] == "1000000"
+    assert capital["nominal_value_per_share"] == "1"
+
+
+def test_status_report_capital_uses_selected_country_currency_when_symbol_is_absent():
+    capital, _ = extract_share_capital("Total Share Capital 1,000,000", country_code="NGA")
+
+    assert capital["amount"] == "1000000"
+    assert capital["currency"] == "NGN"
+
+
+def test_articles_directors_prose_is_not_parsed_as_people():
+    text = """SUBSCRIBERS
+FULL NAME    SHARES
+Alex Example    10 SHARES
+ARTICLES OF ASSOCIATION
+DIRECTORS
+Directors' General Authority
+Subject to the articles, the directors are responsible for management of the company.
+DIRECTORS
+Directors to Take Decisions Collectively
+The directors may make decisions at a properly convened meeting.
+DIRECTORS
+Corporate Affairs Commission
+Model articles for private companies limited by shares
+"""
+
+    parties, _ = extract_parties(text)
+
+    assert parties == [{"name": "Alex Example", "roles": ["SUBSCRIBER"], "shares": "10"}]
+
+
+def test_cac_role_type_records_extract_named_company_parties_safely():
+    text = """DIRECTOR'SDETAILS
+1. ROLE TYPE DIRECTOR
+SURNAME Example
+FIRSTNAME Ada
+OTHERNAME NIL
+STATUS ACTIVE
+EMAIL ada@example.invalid
+IDENTIFICATION NUMBER 123456789
+2.F ROLE TYPE DIRECTOR
+SURNAME Sample
+FIRSTNAME Ben
+OTHERNAME Chidi
+STATUS ACTIVE
+SECRETARY'SDETAILS
+3. ROLE TYPE SECRETARYCOMPANY
+COMPANY NAME Example Secretarial Services Limited
+STATUS ACTIVE
+SHAREHOLDERS
+4. ROLE TYPE SHAREHOLDER
+SURNAME Holder
+FIRSTNAME Chi
+TOTALNUMBEROFSHARES 250
+SHAREPERCENTAGE 25%
+PERSONSWITHSIGNIFICANTCONTROL
+5. ROLE TYPE PERSONWITHSIGNIFICANTCONTROL
+SURNAME Control
+FIRSTNAME Dele
+PHONE 08000000000
+"""
+
+    parties, _ = extract_parties(text)
+
+    assert parties == [
+        {"name": "Example Ada", "roles": ["DIRECTOR"], "status": "ACTIVE"},
+        {"name": "Sample Ben Chidi", "roles": ["DIRECTOR"], "status": "ACTIVE"},
+        {
+            "name": "Example Secretarial Services Limited",
+            "roles": ["SECRETARY"],
+            "status": "ACTIVE",
+        },
+        {
+            "name": "Holder Chi",
+            "roles": ["SHAREHOLDER"],
+            "shares": "250",
+            "share_percentage": "25",
+        },
+        {"name": "Control Dele", "roles": ["PERSON_WITH_SIGNIFICANT_CONTROL"]},
+    ]
+    assert all("email" not in party and "phone" not in party and "identifiers" not in party for party in parties)
 
 
 def test_bare_dollar_requires_country_context():

@@ -190,7 +190,7 @@ def parse_generic_business_fields(
 
     additional_fields = []
     for pair in pairs:
-        if _canonical_field_for_label(pair.label) or _is_core_label(pair.label):
+        if _canonical_field_for_label(pair.label) or _is_core_label(pair.label) or _is_noisy_additional_pair(pair):
             continue
         item = {
             "label": pair.label,
@@ -357,6 +357,33 @@ def _normalize_known_value(field: str, value: str, *, country_code: Optional[str
 def _is_core_label(label: str) -> bool:
     normalized = _normalize_label(label)
     return normalized.startswith(_EXCLUDED_LABEL_PREFIXES) or normalized.endswith(" SHARES")
+
+
+def _is_noisy_additional_pair(pair: LabelValue) -> bool:
+    """Drop obvious layout and personal-contact fragments, not unknown business data."""
+    label = _normalize_label(pair.label)
+    value = _normalize_label(pair.value)
+    personal_or_signatory = re.match(
+        r"^(?:EMAIL(?: ADDRESS)?|PHONE(?: NUMBER)?|TELEPHONE|MOBILE|RESIDENTIAL ADDRESS|"
+        r"CONTACT ADDRESS|SIGNATURES?|SIGNED BY|WITNESS(?: DETAILS)?|PRESENTED BY)$",
+        label,
+    )
+    heading_fragment = re.match(
+        r"^(?:DETAILS|PARTICULARS|OTHER INFORMATION|PERSONAL INFORMATION|SIGNATORY DETAILS|"
+        r"DIRECTORS?|SHAREHOLDERS?|SUBSCRIBERS?|BENEFICIAL OWNERS?|"
+        r"PERSONS? WITH SIGNIFICANT CONTROL)$",
+        label,
+    ) or re.match(
+        r"^(?:DIRECTORS?|SHAREHOLDERS?|SUBSCRIBERS?|BENEFICIAL OWNERS?|"
+        r"PERSONS? WITH SIGNIFICANT CONTROL|SIGNATURES?)$",
+        value,
+    )
+    certificate_layout = (
+        (label == "OF A" and re.search(r"\b(?:PRIVATE|PUBLIC)\s+COMPANY\b", value))
+        or (label in {"REGISTRAR", "THE REGISTRAR"} and re.search(r"\bGENERAL\b", value))
+        or bool(re.fullmatch(r"(?:REGISTRAR|REGISTRAR GENERAL)", value))
+    )
+    return bool(personal_or_signatory or heading_fragment or certificate_layout)
 
 
 def _normalize_label(value: str) -> str:
