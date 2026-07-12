@@ -31,11 +31,11 @@ jobs:
 
     - name: Check formatting
       run: |
-        ruff format --check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+        ruff format --check app.py src/api/routes.py src/core/document_source.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py tests/test_document_source.py tests/test_url_input_api.py
 
     - name: Lint
       run: |
-        ruff check app.py src/api/routes.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py
+        ruff check app.py src/api/routes.py src/core/document_source.py src/document_ocr/business_document src/document_ocr/text_extraction.py tests/test_business_document_*.py tests/test_document_source.py tests/test_url_input_api.py
 
     - name: Type check
       run: |

@@ -303,7 +303,7 @@ def test_business_document_endpoint_rejects_missing_upload(client):
     result = response.get_json()
     assert EXPECTED_RESPONSE_KEYS.issubset(result)
     assert result["success"] is False
-    assert result["message"] == "No file provided"
+    assert result["message"] == "No file provided and no document URL provided."
     assert result["request_id"]
 
 
@@ -329,7 +329,7 @@ def test_business_document_endpoint_returns_canonical_unhandled_error(client, mo
 
 
 def test_business_document_endpoint_rejects_oversized_multipart_before_processing(client, monkeypatch):
-    monkeypatch.setitem(app.config, "BUSINESS_DOCUMENT_MAX_CONTENT_LENGTH", 256)
+    monkeypatch.setitem(app.config, "DOCUMENT_MAX_CONTENT_LENGTH", 256)
     response = client.post(
         "/api/business-document",
         data={"file": (io.BytesIO(b"x" * 1024), "oversized.png")},
@@ -345,22 +345,23 @@ def test_business_document_endpoint_rejects_oversized_multipart_before_processin
     assert "request size limit" in result["message"]
 
 
-def test_business_document_request_cap_does_not_change_legacy_endpoint_limits(client, monkeypatch):
-    monkeypatch.setitem(app.config, "BUSINESS_DOCUMENT_MAX_CONTENT_LENGTH", 256)
+def test_shared_document_request_cap_applies_to_existing_ocr_endpoints(client, monkeypatch):
+    monkeypatch.setitem(app.config, "DOCUMENT_MAX_CONTENT_LENGTH", 256)
     response = client.post(
         "/api/passport",
         data={"file": (io.BytesIO(b"x" * 1024), "legacy.jpg")},
         content_type="multipart/form-data",
     )
 
-    assert response.status_code != 413
+    assert response.status_code == 413
+    assert response.get_json()["success"] is False
 
 
-def test_business_document_pretty_printing_does_not_change_legacy_json(client):
+def test_pretty_printing_applies_to_existing_ocr_endpoints(client):
     response = client.post("/api/bank-statement")
 
     assert response.status_code == 400
-    assert '\n  "' not in response.get_data(as_text=True)
+    _assert_pretty_json_response(response)
 
 
 def test_business_document_endpoint_rejects_invalid_upload_with_stable_error(client):

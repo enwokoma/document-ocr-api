@@ -16,28 +16,41 @@ from flasgger import Swagger
 from werkzeug.exceptions import RequestEntityTooLarge
 
 from src.api.routes import passport_bp
-from src.document_ocr.business_document.config import get_business_document_settings
+from src.core.document_source import get_document_source_settings
 from src.document_ocr.business_document.processor import business_document_error
 from src.webhook_forwarder.routes import forwarder_bp
 
-business_document_settings = get_business_document_settings()
+document_source_settings = get_document_source_settings()
+_DOCUMENT_OCR_PATHS = frozenset(
+    {
+        "/api/scan-passport",
+        "/api/passport",
+        "/api/nin",
+        "/api/bank-statement",
+        "/api/utility-bill",
+        "/api/voter-id",
+        "/api/drivers-license",
+        "/api/business-document",
+    }
+)
 
 
 class DocumentOCRRequest(Request):
-    """Apply the business upload cap without changing legacy endpoint limits."""
+    """Apply the shared upload cap only to OCR document endpoints."""
 
     @property
     def max_content_length(self) -> int | None:
-        if self.path == "/api/business-document":
-            return current_app.config["BUSINESS_DOCUMENT_MAX_CONTENT_LENGTH"]
+        if self.path in _DOCUMENT_OCR_PATHS:
+            return current_app.config["DOCUMENT_MAX_CONTENT_LENGTH"]
         return super().max_content_length
 
 
 app = Flask(__name__)
 app.request_class = DocumentOCRRequest
+app.json.compact = False
 # Leave room for multipart boundaries while enforcing the request-scoped cap
-# before Flask materializes a business-document upload.
-app.config["BUSINESS_DOCUMENT_MAX_CONTENT_LENGTH"] = business_document_settings.max_upload_bytes + 1024 * 1024
+# before Flask materializes any OCR document upload. Webhooks remain unaffected.
+app.config["DOCUMENT_MAX_CONTENT_LENGTH"] = document_source_settings.max_bytes + 1024 * 1024
 
 swagger_config = {
     "headers": [],
@@ -66,16 +79,6 @@ Swagger(app, config=swagger_config)
 
 app.register_blueprint(passport_bp, url_prefix="/api")
 app.register_blueprint(forwarder_bp, url_prefix="/api")
-
-
-@app.after_request
-def format_business_document_json(response):
-    """Pretty-print only business-document JSON without changing legacy routes."""
-    if request.path == "/api/business-document" and response.is_json:
-        payload = response.get_json(silent=True)
-        if payload is not None:
-            response.set_data(f"{app.json.dumps(payload, indent=2)}\n")
-    return response
 
 
 @app.errorhandler(RequestEntityTooLarge)

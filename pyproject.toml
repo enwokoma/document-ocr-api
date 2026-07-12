@@ -14,7 +14,7 @@ docstring-code-format = true
 
 [tool.mypy]
 python_version = "3.11"
-files = ["app.py", "src/api/routes.py", "src/document_ocr/business_document", "src/document_ocr/text_extraction.py"]
+files = ["app.py", "src/api/routes.py", "src/core/document_source.py", "src/document_ocr/business_document", "src/document_ocr/text_extraction.py"]
 ignore_missing_imports = true
 follow_imports = "skip"
 check_untyped_defs = true

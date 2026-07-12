@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from src.core.document_source import detect_document_file_type
+
 
 @dataclass(frozen=True)
 class BusinessUploadInspection:
@@ -44,8 +46,8 @@ def inspect_business_upload(
         )
 
     header = _read_header(file_stream)
-    detected = _detect_file_type(header)
-    if detected is None:
+    detected_file_type = detect_document_file_type(header)
+    if detected_file_type is None:
         return BusinessUploadInspection(
             False,
             None,
@@ -55,7 +57,8 @@ def inspect_business_upload(
         )
 
     expected_is_pdf = extension == ".pdf"
-    detected_is_pdf = detected == "pdf"
+    detected = "pdf" if detected_file_type == "pdf" else "image"
+    detected_is_pdf = detected_file_type == "pdf"
     if expected_is_pdf != detected_is_pdf and extension in ({".pdf"} | _IMAGE_EXTENSIONS):
         return BusinessUploadInspection(
             False,
@@ -106,17 +109,3 @@ def _read_header(file_stream: Any, length: int = 16) -> bytes:
                 file_stream.seek(0 if original is None else original)
             except (OSError, TypeError, ValueError):
                 pass
-
-
-def _detect_file_type(header: bytes) -> Optional[str]:
-    if header.startswith(b"%PDF-"):
-        return "pdf"
-    if header.startswith(b"\xff\xd8\xff"):
-        return "image"
-    if header.startswith(b"\x89PNG\r\n\x1a\n"):
-        return "image"
-    if header.startswith((b"II*\x00", b"MM\x00*", b"BM")):
-        return "image"
-    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
-        return "image"
-    return None
