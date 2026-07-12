@@ -6,7 +6,6 @@ import re
 from datetime import date
 from typing import Iterable, Optional
 
-
 _MONTHS = {
     "JAN": 1,
     "JANUARY": 1,
@@ -47,6 +46,7 @@ _JOINED_LABELS = {
     "REGISTRATIONDATE": "REGISTRATION DATE",
     "REGISTEREDADDRESS": "REGISTERED ADDRESS",
     "REGISTEREDOFFICE": "REGISTERED OFFICE",
+    "HEADOFFICEADDRESS": "HEAD OFFICE ADDRESS",
     "HEAD_OFFICEADDRESS": "HEAD OFFICE ADDRESS",
     "COMPANYSTATUS": "COMPANY STATUS",
     "ENTITYSTATUS": "ENTITY STATUS",
@@ -57,20 +57,32 @@ _JOINED_LABELS = {
 }
 
 
-def normalize_business_text(text: str) -> str:
-    """Normalize OCR punctuation/spacing while preserving page and line breaks."""
+def normalize_business_text(text: str, *, preserve_columns: bool = False) -> str:
+    """Normalize OCR text while preserving page and line breaks.
+
+    ``preserve_columns`` retains repeated spaces and pipe separators used by
+    registry tables.  The default remains the compact representation expected
+    by label and prose extractors.
+    """
     value = str(text or "").replace("\r\n", "\n").replace("\r", "\n")
     value = value.replace("\u2013", "-").replace("\u2014", "-").replace("\u00a0", " ")
     lines = []
     for raw_line in value.split("\n"):
-        line = re.sub(r"[|]+", " ", raw_line)
-        line = re.sub(r"[ \t\f\v]+", " ", line).strip()
+        if preserve_columns:
+            line = re.sub(r"\t+", "    ", raw_line)
+            line = re.sub(r"\s*\|+\s*", " | ", line)
+            line = re.sub(r"[\f\v]+", " ", line).strip()
+        else:
+            line = re.sub(r"[|]+", " ", raw_line)
+            line = re.sub(r"[ \t\f\v]+", " ", line).strip()
         if not line:
             continue
         compact_upper = re.sub(r"[^A-Z_]", "", line.upper())
         for joined, replacement in _JOINED_LABELS.items():
             if compact_upper.startswith(joined):
                 consumed = _joined_prefix_length(line, joined)
+                if not _is_joined_label_prefix(line, consumed):
+                    continue
                 line = replacement + " " + line[consumed:].lstrip(" :-._")
                 break
         lines.append(line.strip())
@@ -82,8 +94,15 @@ def normalize_company_name(value: str) -> Optional[str]:
     if not value:
         return None
     cleaned = " ".join(str(value).replace("\n", " ").split())
-    cleaned = re.sub(r"^(?:NAME\s+OF\s+(?:THE\s+)?COMPANY|COMPANY\s+NAME|ENTITY\s+NAME|BUSINESS\s+NAME)\s*[:#-]?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+(?:IS|WAS|HAS\s+BEEN)\s+(?:HEREBY\s+)?(?:INCORPORATED|REGISTERED)\b.*$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"^(?:NAME\s+OF\s+(?:THE\s+)?COMPANY|LEGAL\s+(?:COMPANY|ENTITY)\s+NAME|COMPANY\s+NAME|ENTITY\s+NAME|BUSINESS\s+NAME)\s*[:#-]?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\s+(?:IS|WAS|HAS\s+BEEN)\s+(?:HEREBY\s+)?(?:INCORPORATED|REGISTERED)\b.*$", "", cleaned, flags=re.IGNORECASE
+    )
     cleaned = cleaned.strip(" :;,.-_\"'“”")
     return cleaned[:180] or None
 
@@ -146,8 +165,14 @@ def normalize_entity_type(value: str) -> Optional[str]:
         return None
     rules = (
         ("COMPANY_LIMITED_BY_GUARANTEE", r"\b(?:COMPANY\s+)?LIMITED\s+BY\s+GUARANTEE\b|\bLTD\s*/?\s*GTE\b"),
-        ("PUBLIC_COMPANY_LIMITED_BY_SHARES", r"\bPUBLIC\s+(?:LIMITED\s+)?COMPANY\b|\bPUBLIC\s+COMPANY\s+LIMITED\s+BY\s+SHARES\b|\bPLC\b"),
-        ("PRIVATE_COMPANY_LIMITED_BY_SHARES", r"\bPRIVATE\s+(?:LIMITED\s+)?COMPANY\b|\bPRIVATE\s+COMPANY\s+LIMITED\s+BY\s+SHARES\b"),
+        (
+            "PUBLIC_COMPANY_LIMITED_BY_SHARES",
+            r"\bPUBLIC\s+(?:LIMITED\s+)?COMPANY\b|\bPUBLIC\s+COMPANY\s+LIMITED\s+BY\s+SHARES\b|\bPLC\b",
+        ),
+        (
+            "PRIVATE_COMPANY_LIMITED_BY_SHARES",
+            r"\bPRIVATE\s+(?:LIMITED\s+)?COMPANY\b|\bPRIVATE\s+COMPANY\s+LIMITED\s+BY\s+SHARES\b",
+        ),
         ("LIMITED_LIABILITY_COMPANY", r"\bLIMITED\s+LIABILITY\s+COMPANY\b|\bLLC\b"),
         ("LIMITED_LIABILITY_PARTNERSHIP", r"\bLIMITED\s+LIABILITY\s+PARTNERSHIP\b|\bLLP\b"),
         ("UNLIMITED_COMPANY", r"\bUNLIMITED\s+COMPANY\b"),
@@ -209,6 +234,19 @@ def _joined_prefix_length(line: str, joined: str) -> int:
         if not joined.startswith(compact):
             break
     return 0
+
+
+def _is_joined_label_prefix(line: str, consumed: int) -> bool:
+    """Reject ordinary title-cased words such as ``CompanyName Holdings``."""
+    if consumed <= 0:
+        return False
+    prefix = line[:consumed]
+    following = line[consumed : consumed + 1]
+    if following and following in ":#.-_":
+        return True
+    # OCR labels are normally uppercase. Requiring that signal keeps title-case
+    # legal names beginning with CompanyName/BusinessName intact.
+    return prefix.isupper()
 
 
 def _normalize_year(year: int) -> int:

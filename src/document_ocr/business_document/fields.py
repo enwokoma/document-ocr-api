@@ -202,24 +202,6 @@ def parse_core_business_fields(
 
 
 def _extract_company_name(text: str, lines: Sequence[str], *, document_type: str) -> Optional[_ValueMatch]:
-    labelled = _extract_labeled_value(
-        lines,
-        labels=(
-            r"NAME\s+OF\s+(?:THE\s+)?COMPANY",
-            r"REGISTERED\s+(?:COMPANY\s+)?NAME",
-            r"COMPANY\s+NAME",
-            r"ENTITY\s+NAME",
-            r"BUSINESS\s+NAME",
-        ),
-        validator=_looks_like_company_name,
-        method="company_name_label",
-        confidence=0.98,
-    )
-    if labelled:
-        cleaned = normalize_company_name(labelled.value)
-        if cleaned:
-            return _ValueMatch(cleaned, labelled.excerpt, labelled.method, labelled.confidence)
-
     phrase_patterns = (
         r"(?:THIS\s+IS\s+TO|I\s+HEREBY)\s+CERTIF(?:Y|IES)\s+THAT\s+([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180}?)\s+(?:IS|WAS|HAS\s+BEEN)\s+(?:HEREBY\s+)?(?:INCORPORATED|REGISTERED)",
         r"\bCERTIFICATE\s+OF\s+(?:INCORPORATION|REGISTRATION)\s+(?:OF|FOR)\s+([A-Z0-9][A-Z0-9 &'(),.\-/]{2,180})",
@@ -232,6 +214,25 @@ def _extract_company_name(text: str, lines: Sequence[str], *, document_type: str
         candidate = normalize_company_name(match.group(1))
         if candidate and _looks_like_company_name(candidate):
             return _ValueMatch(candidate, match.group(0), "certificate_or_title_phrase", 0.94)
+
+    labelled = _extract_labeled_value(
+        lines,
+        labels=(
+            r"NAME\s+OF\s+(?:THE\s+)?COMPANY",
+            r"REGISTERED\s+(?:COMPANY\s+)?NAME",
+            r"LEGAL\s+(?:COMPANY|ENTITY)\s+NAME",
+            r"COMPANY\s+NAME",
+            r"ENTITY\s+NAME",
+            r"BUSINESS\s+NAME",
+        ),
+        validator=_looks_like_company_name,
+        method="company_name_label",
+        confidence=0.98,
+    )
+    if labelled:
+        cleaned = normalize_company_name(labelled.value)
+        if cleaned:
+            return _ValueMatch(cleaned, labelled.excerpt, labelled.method, labelled.confidence)
 
     candidates: list[tuple[int, str]] = []
     title_indexes = [
@@ -343,7 +344,11 @@ def _extract_company_status(text: str, lines: Sequence[str]) -> Optional[_ValueM
         normalized = normalize_company_status(labelled.value)
         if normalized:
             return _ValueMatch(normalized, labelled.excerpt, labelled.method, labelled.confidence)
-    match = re.search(r"\b(?:COMPANY|ENTITY|REGISTRATION)\s+(?:IS\s+)?(ACTIVE|INACTIVE|DISSOLVED|STRUCK\s+OFF|IN\s+LIQUIDATION)\b", text, re.IGNORECASE)
+    match = re.search(
+        r"\b(?:COMPANY|ENTITY|REGISTRATION)\s+(?:IS\s+)?(ACTIVE|INACTIVE|DISSOLVED|STRUCK\s+OFF|IN\s+LIQUIDATION)\b",
+        text,
+        re.IGNORECASE,
+    )
     if match:
         normalized = normalize_company_status(match.group(1))
         if normalized:
@@ -391,7 +396,14 @@ def _extract_document_date(
     labelled = _extract_date(
         text,
         lines,
-        labels=(r"DATE\s+OF\s+REPORT", r"REPORT\s+DATE", r"DOCUMENT\s+DATE", r"GENERATED\s+(?:ON|DATE)", r"PRINTED\s+(?:ON|DATE)", r"AS\s+AT"),
+        labels=(
+            r"DATE\s+OF\s+REPORT",
+            r"REPORT\s+DATE",
+            r"DOCUMENT\s+DATE",
+            r"GENERATED\s+(?:ON|DATE)",
+            r"PRINTED\s+(?:ON|DATE)",
+            r"AS\s+AT",
+        ),
         fallback_patterns=(),
         country_code=country_code,
         method="document_date_label",
@@ -537,7 +549,10 @@ def _looks_like_address(value: str) -> bool:
         return False
     return bool(
         re.search(r"\d", upper)
-        or re.search(r"\b(?:STREET|ROAD|AVENUE|CLOSE|DRIVE|LANE|PLOT|SUITE|FLOOR|BUILDING|DISTRICT|STATE|CITY|LGA|POSTAL|OFFICE)\b", upper)
+        or re.search(
+            r"\b(?:STREET|ROAD|AVENUE|CLOSE|DRIVE|LANE|PLOT|SUITE|FLOOR|BUILDING|DISTRICT|STATE|CITY|LGA|POSTAL|OFFICE)\b",
+            upper,
+        )
     )
 
 
