@@ -28,9 +28,27 @@ curl -X POST http://localhost:5005/api/business-document \
   -F "document_type=CERTIFICATE_OF_INCORPORATION"
 ```
 
+PowerShell example for the local Nigerian samples (adjust the port if the server was started on `5000` instead of the application's default `5005`):
+
+```powershell
+curl.exe -X POST "http://localhost:5005/api/business-document" `
+  -F "file=@C:\path\to\document-ocr-api\CAC.pdf" `
+  -F "country=NGA"
+```
+
+Use the same endpoint for all three samples. The document-type hint is optional; classification is performed from the extracted text.
+
+| Local sample | Expected type |
+| --- | --- |
+| `CAC.pdf` | `CERTIFICATE_OF_INCORPORATION` |
+| `MEMART.pdf` | `MEMORANDUM_AND_ARTICLES_OF_ASSOCIATION` |
+| `StatusReport.pdf` | `COMPANY_STATUS_REPORT` |
+
+The current `MEMART.pdf` has 28 pages, while the safe default processes 20. To extract all of it, set `BUSINESS_DOCUMENT_MAX_PAGES=40` before starting the server; the configured decoded-pixel and request-size limits still apply.
+
 The upload inspector accepts PDF, JPEG, PNG, TIFF, BMP, and WebP signatures. A recognized filename extension that disagrees with the content signature is rejected. Invalid, empty, or unreadable uploads return HTTP 400. A request rejected by Flask's pre-multipart body cap returns HTTP 413; a file that exceeds the configured upload limit after parsing returns 400. A parsed document returns HTTP 200 even when its type or jurisdiction is unknown; callers must inspect confidence and warnings. An unhandled server error returns HTTP 500.
 
-The HTTP route adds a `request_id` to the processor response.
+The HTTP route adds a `request_id` to the processor response and pretty-prints its JSON body. Other endpoints retain the repository's compact JSON convention.
 
 ## Architecture and processing flow
 

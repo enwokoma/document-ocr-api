@@ -68,6 +68,16 @@ app.register_blueprint(passport_bp, url_prefix="/api")
 app.register_blueprint(forwarder_bp, url_prefix="/api")
 
 
+@app.after_request
+def format_business_document_json(response):
+    """Pretty-print only business-document JSON without changing legacy routes."""
+    if request.path == "/api/business-document" and response.is_json:
+        payload = response.get_json(silent=True)
+        if payload is not None:
+            response.set_data(f"{app.json.dumps(payload, indent=2)}\n")
+    return response
+
+
 @app.errorhandler(RequestEntityTooLarge)
 def request_entity_too_large(_error):
     """Return JSON rather than Flask's HTML page for oversized request bodies."""

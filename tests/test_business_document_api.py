@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,16 @@ def _assert_stable_success_response(result: dict[str, Any], raw_text: str) -> No
     assert isinstance(result["conflicts"], list)
     assert isinstance(result["evidence"], dict)
     assert isinstance(result["field_confidence"], dict)
+
+
+def _assert_pretty_json_response(response: Any) -> None:
+    body = response.get_data(as_text=True)
+    assert response.mimetype == "application/json"
+    assert response.content_length == len(response.get_data())
+    assert body.startswith("{\n")
+    assert body.endswith("\n")
+    assert '\n  "' in body
+    assert json.loads(body) == response.get_json()
 
 
 def _assert_evidence(result: dict[str, Any], field: str, *, page: int = 1) -> None:
@@ -288,6 +299,7 @@ def test_business_document_endpoint_rejects_missing_upload(client):
     response = client.post("/api/business-document")
 
     assert response.status_code == 400
+    _assert_pretty_json_response(response)
     result = response.get_json()
     assert EXPECTED_RESPONSE_KEYS.issubset(result)
     assert result["success"] is False
@@ -325,6 +337,7 @@ def test_business_document_endpoint_rejects_oversized_multipart_before_processin
     )
 
     assert response.status_code == 413
+    _assert_pretty_json_response(response)
     result = response.get_json()
     assert EXPECTED_RESPONSE_KEYS.issubset(result)
     assert result["success"] is False
@@ -341,6 +354,13 @@ def test_business_document_request_cap_does_not_change_legacy_endpoint_limits(cl
     )
 
     assert response.status_code != 413
+
+
+def test_business_document_pretty_printing_does_not_change_legacy_json(client):
+    response = client.post("/api/bank-statement")
+
+    assert response.status_code == 400
+    assert '\n  "' not in response.get_data(as_text=True)
 
 
 def test_business_document_endpoint_rejects_invalid_upload_with_stable_error(client):
@@ -395,6 +415,7 @@ def test_business_document_endpoint_processes_multipart_hints_and_logs_only_meta
         )
 
     assert response.status_code == 200
+    _assert_pretty_json_response(response)
     result = response.get_json()
     _assert_stable_success_response(result, text)
     assert result["request_id"] == "business-integration-test"
