@@ -1,252 +1,146 @@
-"""Country and registry detection for business registration documents.
+"""Jurisdiction detection and the public business-profile registry facade.
 
-The parser remains usable for an unknown country.  Profiles add stronger
-authority markers and registration-number patterns for common English-language
-registry documents; they are not a claim that every layout from that country is
-fully supported.
+Country hints are advisory: strong registry evidence in OCR text wins, while a
+matching hint raises confidence.  Unknown countries remain valid inputs and use
+the generic profile only during field/identifier extraction.
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional
+from typing import Any, Dict, Optional
 
+from src.document_ocr.business_document.identifiers import (
+    IdentifierPattern,
+    IdentifierType,
+    RegistrationPattern,
+)
+from src.document_ocr.business_document.profiles import (
+    BUSINESS_PROFILE_REGISTRY,
+    GENERIC_BUSINESS_PROFILE,
+    AuthorityMarker,
+    BusinessJurisdictionProfile,
+    SubdivisionProfile,
+    get_business_profile,
+    list_business_profiles,
+    register_business_profile,
+    resolve_business_country_code,
+    unregister_business_profile,
+)
 from src.document_ocr.business_document.schema import JurisdictionResult, confidence_level
 
 
 @dataclass(frozen=True)
-class AuthorityMarker:
-    """Weighted registry/country phrase used for jurisdiction inference."""
+class SubdivisionResult:
+    """Detected state, province, or equivalent company-registry jurisdiction."""
 
-    label: str
-    pattern: str
-    weight: float
+    country_code: str
+    code: Optional[str]
+    name: Optional[str]
+    registry_name: Optional[str]
+    confidence: float
+    source: str
+    matched_terms: tuple[str, ...] = ()
+    ambiguous: bool = False
+    alternatives: tuple[dict[str, Any], ...] = ()
+
+    def as_dict(self) -> dict[str, Any]:
+        score = round(max(0.0, min(float(self.confidence), 1.0)), 3)
+        return {
+            "country_code": self.country_code,
+            "jurisdiction_code": self.code,
+            "jurisdiction_name": self.name,
+            "registry_name": self.registry_name,
+            "confidence": score,
+            "confidence_level": confidence_level(score),
+            "source": self.source,
+            "matched_terms": list(self.matched_terms),
+            "ambiguous": self.ambiguous,
+            "alternatives": [dict(item) for item in self.alternatives],
+        }
 
 
-@dataclass(frozen=True)
-class RegistrationPattern:
-    """Country-specific company identifier pattern."""
-
-    pattern: str
-    number_type: str
-    confidence: float = 0.90
+# Existing callers import this mapping directly.  It is the registry's live
+# mapping, so profiles registered at application startup become detectable
+# without rebuilding a second cache.
+BUSINESS_JURISDICTIONS: Dict[str, BusinessJurisdictionProfile] = BUSINESS_PROFILE_REGISTRY.profiles
 
 
-@dataclass(frozen=True)
-class BusinessJurisdictionProfile:
-    """Business-registry hints for one incorporation jurisdiction."""
-
-    code: str
-    name: str
-    registry_name: str
-    authority_markers: tuple[AuthorityMarker, ...]
-    registration_patterns: tuple[RegistrationPattern, ...] = ()
-    high_score: float = 8.0
-    minimum_score: float = 3.0
+def register_business_jurisdiction(
+    profile: BusinessJurisdictionProfile,
+    *,
+    replace: bool = False,
+) -> BusinessJurisdictionProfile:
+    """Compatibility-named facade for registering a business profile."""
+    return register_business_profile(profile, replace=replace)
 
 
-BUSINESS_JURISDICTIONS: Dict[str, BusinessJurisdictionProfile] = {
-    "NGA": BusinessJurisdictionProfile(
-        code="NGA",
-        name="Nigeria",
-        registry_name="Corporate Affairs Commission",
-        authority_markers=(
-            AuthorityMarker("Corporate Affairs Commission", r"\bCORPORATE\s+AFFAIRS\s+COMMISSION\b", 6.0),
-            AuthorityMarker("Federal Republic of Nigeria", r"\bFEDERAL\s+REPUBLIC\s+OF\s+NIGERIA\b", 4.0),
-            AuthorityMarker("Companies and Allied Matters Act", r"\bCOMPANIES\s+AND\s+ALLIED\s+MATTERS\s+ACT\b", 4.0),
-            AuthorityMarker("CAMA", r"\bCAMA(?:\s+20\d{2})?\b", 2.0),
-            AuthorityMarker("CAC identifier", r"\b(?:RC|BN|IT|LLP|LP)\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*\d{4,12}\b", 2.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?P<prefix>RC|BN|IT|LLP|LP)\s*(?:NO\.?|NUMBER)?\s*[:#-]?\s*(?P<number>\d{4,12})\b",
-                "CAC_{prefix}",
-                0.97,
-            ),
-            RegistrationPattern(
-                r"\b(?:REGISTRATION|REGISTERED)\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*(?P<number>\d{4,12})\b",
-                "CAC_REGISTRATION_NUMBER",
-                0.90,
-            ),
-        ),
-    ),
-    "GHA": BusinessJurisdictionProfile(
-        code="GHA",
-        name="Ghana",
-        registry_name="Office of the Registrar of Companies",
-        authority_markers=(
-            AuthorityMarker("Office of the Registrar of Companies", r"\bOFFICE\s+OF\s+THE\s+REGISTRAR\s+OF\s+COMPANIES\b", 6.0),
-            AuthorityMarker("Registrar-General's Department", r"\bREGISTRAR[ -]GENERAL(?:'S)?\s+DEPARTMENT\b", 5.0),
-            AuthorityMarker("Republic of Ghana", r"\bREPUBLIC\s+OF\s+GHANA\b", 4.0),
-            AuthorityMarker("Companies Act 2019", r"\bCOMPANIES\s+ACT\s*,?\s*2019\s*\(?ACT\s*992\)?", 4.0),
-            AuthorityMarker("Ghana company number", r"\b(?:CS|BN|CG|PL)\d{5,12}\b", 2.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?P<number>(?:CS|BN|CG|PL)[-\s]?\d{5,12})\b",
-                "GHANA_REGISTRATION_NUMBER",
-                0.94,
-            ),
-        ),
-    ),
-    "GBR": BusinessJurisdictionProfile(
-        code="GBR",
-        name="United Kingdom",
-        registry_name="Companies House",
-        authority_markers=(
-            AuthorityMarker("Companies House", r"\bCOMPANIES\s+HOUSE\b", 6.0),
-            AuthorityMarker("Registrar of Companies", r"\bREGISTRAR\s+OF\s+COMPANIES\b", 4.0),
-            AuthorityMarker("Companies Act 2006", r"\bCOMPANIES\s+ACT\s+2006\b", 4.0),
-            AuthorityMarker("United Kingdom", r"\bUNITED\s+KINGDOM\b", 2.5),
-            AuthorityMarker("UK registered office jurisdiction", r"\b(?:ENGLAND\s+AND\s+WALES|SCOTLAND|NORTHERN\s+IRELAND|WALES)\b", 1.5),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\bCOMPANY\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*(?P<number>[A-Z0-9]{6,10})\b",
-                "UK_COMPANY_NUMBER",
-                0.92,
-            ),
-            RegistrationPattern(
-                r"\b(?P<number>(?:SC|NI|OC|SO|FC|LP|SL|R0|RS)\d{6,8})\b",
-                "UK_COMPANY_NUMBER",
-                0.92,
-            ),
-        ),
-    ),
-    "KEN": BusinessJurisdictionProfile(
-        code="KEN",
-        name="Kenya",
-        registry_name="Business Registration Service",
-        authority_markers=(
-            AuthorityMarker("Business Registration Service", r"\bBUSINESS\s+REGISTRATION\s+SERVICE\b", 6.0),
-            AuthorityMarker("Republic of Kenya", r"\bREPUBLIC\s+OF\s+KENYA\b", 4.0),
-            AuthorityMarker("Kenyan Registrar of Companies", r"\bREGISTRAR\s+OF\s+COMPANIES\b", 3.0),
-            AuthorityMarker("Kenya Companies Act 2015", r"\bCOMPANIES\s+ACT\s*,?\s*2015\b", 4.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?P<number>PVT[-/][A-Z0-9/-]{5,24}|CPR[/A-Z0-9-]{5,24})\b",
-                "KENYA_COMPANY_NUMBER",
-                0.94,
-            ),
-        ),
-    ),
-    "ZAF": BusinessJurisdictionProfile(
-        code="ZAF",
-        name="South Africa",
-        registry_name="Companies and Intellectual Property Commission",
-        authority_markers=(
-            AuthorityMarker("Companies and Intellectual Property Commission", r"\bCOMPANIES\s+AND\s+INTELLECTUAL\s+PROPERTY\s+COMMISSION\b", 6.0),
-            AuthorityMarker("CIPC", r"\bCIPC\b", 4.0),
-            AuthorityMarker("Republic of South Africa", r"\bREPUBLIC\s+OF\s+SOUTH\s+AFRICA\b", 4.0),
-            AuthorityMarker("Companies Act 71 of 2008", r"\bCOMPANIES\s+ACT\s+(?:NO\.?\s*)?71\s+OF\s+2008\b", 4.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?P<number>\d{4}/\d{5,10}/\d{2})\b",
-                "CIPC_ENTERPRISE_NUMBER",
-                0.97,
-            ),
-        ),
-    ),
-    "CAN": BusinessJurisdictionProfile(
-        code="CAN",
-        name="Canada",
-        registry_name="Corporations Canada",
-        authority_markers=(
-            AuthorityMarker("Corporations Canada", r"\bCORPORATIONS\s+CANADA\b", 6.0),
-            AuthorityMarker("Canada Business Corporations Act", r"\bCANADA\s+BUSINESS\s+CORPORATIONS\s+ACT\b", 5.0),
-            AuthorityMarker("Government of Canada", r"\bGOVERNMENT\s+OF\s+CANADA\b", 3.0),
-            AuthorityMarker("Canadian federal corporation", r"\bFEDERAL\s+CORPORATION\b", 2.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?:CORPORATION\s+(?:NO\.?|NUMBER)\s*[:#-]?\s*)?(?P<number>\d{6,10}-\d)\b",
-                "CANADIAN_CORPORATION_NUMBER",
-                0.94,
-            ),
-        ),
-    ),
-    "USA": BusinessJurisdictionProfile(
-        code="USA",
-        name="United States",
-        registry_name="State corporate registry",
-        authority_markers=(
-            AuthorityMarker("Secretary of State", r"\bSECRETARY\s+OF\s+STATE\b", 4.0),
-            AuthorityMarker("State Department", r"\bDEPARTMENT\s+OF\s+STATE\b", 3.0),
-            AuthorityMarker("State of", r"\bSTATE\s+OF\s+[A-Z]{4,20}\b", 2.5),
-            AuthorityMarker("US corporation law", r"\b(?:GENERAL\s+)?CORPORATION\s+LAW\b", 2.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(
-                r"\b(?:FILE|ENTITY|DOCUMENT|CHARTER)\s+(?:NO\.?|NUMBER|ID)\s*[:#-]?\s*(?P<number>[A-Z0-9-]{5,20})\b",
-                "US_STATE_ENTITY_NUMBER",
-                0.86,
-            ),
-        ),
-        minimum_score=5.0,
-    ),
-    "AUS": BusinessJurisdictionProfile(
-        code="AUS",
-        name="Australia",
-        registry_name="Australian Securities and Investments Commission",
-        authority_markers=(
-            AuthorityMarker("Australian Securities and Investments Commission", r"\bAUSTRALIAN\s+SECURITIES\s+AND\s+INVESTMENTS\s+COMMISSION\b", 6.0),
-            AuthorityMarker("ASIC", r"\bASIC\b", 4.0),
-            AuthorityMarker("Corporations Act 2001", r"\bCORPORATIONS\s+ACT\s+2001\b", 4.0),
-            AuthorityMarker("Commonwealth of Australia", r"\bCOMMONWEALTH\s+OF\s+AUSTRALIA\b", 3.0),
-        ),
-        registration_patterns=(
-            RegistrationPattern(r"\bACN\s*[:#-]?\s*(?P<number>\d{3}\s?\d{3}\s?\d{3})\b", "AUSTRALIAN_COMPANY_NUMBER", 0.94),
-        ),
-    ),
-}
+def unregister_business_jurisdiction(country_code: str) -> Optional[BusinessJurisdictionProfile]:
+    """Remove a registered business-jurisdiction profile."""
+    return unregister_business_profile(country_code)
 
 
 def get_business_jurisdiction(country_code: Optional[str]) -> Optional[BusinessJurisdictionProfile]:
-    """Return one registered business-jurisdiction profile."""
-    code = normalize_country_code(country_code)
-    return BUSINESS_JURISDICTIONS.get(code) if code else None
+    """Return one registered profile, preserving the historical ``None`` fallback."""
+    return get_business_profile(country_code, fallback=False)
+
+
+def get_business_jurisdiction_or_default(country_code: Optional[str]) -> BusinessJurisdictionProfile:
+    """Return a profile or the jurisdiction-neutral generic fallback."""
+    profile = get_business_profile(country_code, fallback=True)
+    return profile or GENERIC_BUSINESS_PROFILE
 
 
 def list_business_jurisdictions() -> Dict[str, BusinessJurisdictionProfile]:
     """Return registered jurisdiction profiles in deterministic order."""
-    return dict(sorted(BUSINESS_JURISDICTIONS.items()))
+    return list_business_profiles()
 
 
 def serialize_business_jurisdiction(profile: BusinessJurisdictionProfile) -> dict[str, object]:
     """Return non-regex jurisdiction metadata suitable for API discovery."""
+    identifier_types = {_canonical_type(pattern.identifier_type) for pattern in profile.identifier_patterns}
+    identifier_types.update(_canonical_type(pattern.identifier_type) for pattern in profile.registration_patterns)
     return {
         "country_code": profile.code,
         "country_name": profile.name,
         "registry_name": profile.registry_name,
+        "aliases": sorted(profile.aliases),
         "registration_number_types": sorted({pattern.number_type for pattern in profile.registration_patterns}),
+        "identifier_types": sorted(identifier_types),
+        "subdivisions": [
+            {
+                "code": item.code,
+                "name": item.name,
+                "registry_name": item.registry_name,
+            }
+            for item in profile.subdivisions
+        ],
     }
 
 
 def normalize_country_code(value: Optional[str]) -> Optional[str]:
-    """Normalize an ISO-3166 alpha-3 hint without accepting arbitrary strings."""
-    if not isinstance(value, str):
-        return None
-    code = value.strip().upper()
-    return code if re.fullmatch(r"[A-Z]{3}", code) else None
+    """Resolve known country aliases and accept unprofiled ISO alpha-3 codes."""
+    return resolve_business_country_code(value)
 
 
 def detect_business_jurisdiction(text: str, country_hint: Optional[str] = None) -> JurisdictionResult:
-    """Reconcile a caller hint with registry authority phrases in OCR text."""
-    normalized = re.sub(r"\s+", " ", str(text or "").upper()).strip()
+    """Reconcile a caller country hint with registry evidence in OCR text."""
+    normalized = _normalize_detection_text(text)
     requested = normalize_country_code(country_hint)
     scored = [_score_profile(normalized, profile) for profile in BUSINESS_JURISDICTIONS.values()]
-    scored.sort(key=lambda item: (item["confidence"], item["raw_score"]), reverse=True)
-    best = scored[0] if scored else None
+    scored.sort(
+        key=lambda item: (float(item["confidence"]), float(item["raw_score"]), str(item["code"])),
+        reverse=True,
+    )
 
+    best = scored[0] if scored else None
     detected_profile: Optional[BusinessJurisdictionProfile] = None
     matched_terms: tuple[str, ...] = ()
     text_confidence = 0.0
     if best and float(best["raw_score"]) >= float(best["minimum_score"]):
-        detected_profile = best["profile"]  # type: ignore[assignment]
-        matched_terms = tuple(best["matched_terms"])  # type: ignore[arg-type]
+        detected_profile = best["profile"]
+        matched_terms = tuple(best["matched_terms"])
         text_confidence = float(best["confidence"])
 
     requested_profile = get_business_jurisdiction(requested)
@@ -283,7 +177,10 @@ def detect_business_jurisdiction(text: str, country_hint: Optional[str] = None) 
             confidence=0.0,
         )
 
-    registry_name = _dynamic_registry_name(selected, normalized)
+    subdivision = detect_business_subdivision(normalized, selected.code)
+    if subdivision and subdivision.code:
+        matched_terms = tuple(dict.fromkeys((*matched_terms, *subdivision.matched_terms)))
+    registry_name = subdivision.registry_name if subdivision and not subdivision.ambiguous else selected.registry_name
     return JurisdictionResult(
         country_code=selected.code,
         country_name=selected.name,
@@ -297,18 +194,117 @@ def detect_business_jurisdiction(text: str, country_hint: Optional[str] = None) 
     )
 
 
+def detect_business_subdivision(
+    text: str,
+    country_code: Optional[str] = None,
+) -> Optional[SubdivisionResult]:
+    """Detect a state/province for a profile that defines subdivisions.
+
+    The built-in United States profile covers all states and the District of
+    Columbia.  Other profiles can opt in by registering subdivisions with
+    weighted authority markers.
+    """
+    normalized = _normalize_detection_text(text)
+    profile = get_business_jurisdiction(country_code)
+    if profile is None or not profile.subdivisions or not normalized:
+        return None
+
+    scored = [_score_subdivision(normalized, item) for item in profile.subdivisions]
+    scored.sort(
+        key=lambda item: (float(item["confidence"]), float(item["raw_score"]), str(item["code"])),
+        reverse=True,
+    )
+    qualified = [item for item in scored if float(item["raw_score"]) >= float(item["minimum_score"])]
+    if not qualified:
+        return None
+
+    best = qualified[0]
+    close = [item for item in qualified[1:] if abs(float(best["confidence"]) - float(item["confidence"])) <= 0.08]
+    ambiguous = bool(close)
+    subdivision: SubdivisionProfile = best["profile"]
+    alternatives = tuple(
+        {
+            "jurisdiction_code": item["code"],
+            "jurisdiction_name": item["name"],
+            "confidence": round(float(item["confidence"]), 3),
+            "matched_terms": list(item["matched_terms"]),
+        }
+        for item in close[:3]
+    )
+    return SubdivisionResult(
+        country_code=profile.code,
+        code=subdivision.code,
+        name=subdivision.name,
+        registry_name=subdivision.registry_name,
+        confidence=float(best["confidence"]),
+        source="document_text_ambiguous" if ambiguous else "document_text",
+        matched_terms=tuple(best["matched_terms"]),
+        ambiguous=ambiguous,
+        alternatives=alternatives,
+    )
+
+
+def jurisdiction_warnings(
+    result: JurisdictionResult,
+    subdivision: Optional[SubdivisionResult] = None,
+) -> tuple[str, ...]:
+    """Return review warnings without changing the stable jurisdiction schema."""
+    warnings = []
+    if result.country_code is None:
+        warnings.append("The country of incorporation could not be reliably determined.")
+    elif result.conflict:
+        warnings.append("The supplied country hint conflicts with the country indicated by registry evidence.")
+    elif result.source == "country_hint_unprofiled":
+        warnings.append("The supplied country has no registered extraction profile; generic rules will be used.")
+    elif result.source == "country_hint":
+        warnings.append("The country is based only on the caller hint and was not confirmed by OCR text.")
+    if subdivision and subdivision.ambiguous:
+        warnings.append("The state or subnational incorporation jurisdiction is ambiguous.")
+    return tuple(warnings)
+
+
 def jurisdiction_keywords() -> tuple[str, ...]:
     """Return marker labels for PDF OCR page-quality scoring."""
     return tuple(
         dict.fromkeys(
-            marker.label.upper()
-            for profile in BUSINESS_JURISDICTIONS.values()
-            for marker in profile.authority_markers
+            marker.label.upper() for profile in BUSINESS_JURISDICTIONS.values() for marker in profile.authority_markers
         )
     )
 
 
-def _score_profile(normalized: str, profile: BusinessJurisdictionProfile) -> dict[str, object]:
+def _score_profile(normalized: str, profile: BusinessJurisdictionProfile) -> dict[str, Any]:
+    raw_score = 0.0
+    matched_terms = []
+    for marker in profile.authority_markers:
+        if re.search(marker.pattern, normalized, flags=re.IGNORECASE):
+            raw_score += marker.weight
+            matched_terms.append(marker.label)
+    # A state/province authority is also strong evidence for its parent
+    # country.  Count only the strongest subdivision marker to avoid inflating
+    # documents that repeat an official header several times.
+    subdivision_matches = [
+        marker
+        for subdivision in profile.subdivisions
+        for marker in subdivision.authority_markers
+        if re.search(marker.pattern, normalized, flags=re.IGNORECASE)
+    ]
+    if subdivision_matches:
+        strongest = max(subdivision_matches, key=lambda marker: marker.weight)
+        raw_score += strongest.weight
+        matched_terms.append(strongest.label)
+    confidence = min(raw_score / profile.high_score, 1.0)
+    return {
+        "profile": profile,
+        "code": profile.code,
+        "raw_score": round(raw_score, 3),
+        "confidence": round(confidence, 4),
+        "confidence_level": confidence_level(confidence),
+        "minimum_score": profile.minimum_score,
+        "matched_terms": matched_terms,
+    }
+
+
+def _score_subdivision(normalized: str, profile: SubdivisionProfile) -> dict[str, Any]:
     raw_score = 0.0
     matched_terms = []
     for marker in profile.authority_markers:
@@ -318,19 +314,44 @@ def _score_profile(normalized: str, profile: BusinessJurisdictionProfile) -> dic
     confidence = min(raw_score / profile.high_score, 1.0)
     return {
         "profile": profile,
+        "code": profile.code,
+        "name": profile.name,
         "raw_score": round(raw_score, 3),
         "confidence": round(confidence, 4),
-        "confidence_level": confidence_level(confidence),
         "minimum_score": profile.minimum_score,
         "matched_terms": matched_terms,
     }
 
 
-def _dynamic_registry_name(profile: BusinessJurisdictionProfile, normalized: str) -> str:
-    if profile.code != "USA":
-        return profile.registry_name
-    match = re.search(r"\bSTATE\s+OF\s+([A-Z][A-Z ]{2,24}?)(?:\s{2,}|\s+SECRETARY|\s+DEPARTMENT|\s+CERTIFICATE|$)", normalized)
-    if not match:
-        return profile.registry_name
-    state = " ".join(match.group(1).split()).title()
-    return f"{state} Secretary of State"
+def _normalize_detection_text(text: str) -> str:
+    value = str(text or "").upper().replace("\u2013", "-").replace("\u2014", "-")
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _canonical_type(value: IdentifierType | str) -> str:
+    return value.value if isinstance(value, IdentifierType) else str(value)
+
+
+__all__ = [
+    "AuthorityMarker",
+    "BUSINESS_JURISDICTIONS",
+    "BusinessJurisdictionProfile",
+    "GENERIC_BUSINESS_PROFILE",
+    "IdentifierPattern",
+    "IdentifierType",
+    "JurisdictionResult",
+    "RegistrationPattern",
+    "SubdivisionProfile",
+    "SubdivisionResult",
+    "detect_business_jurisdiction",
+    "detect_business_subdivision",
+    "get_business_jurisdiction",
+    "get_business_jurisdiction_or_default",
+    "jurisdiction_keywords",
+    "jurisdiction_warnings",
+    "list_business_jurisdictions",
+    "normalize_country_code",
+    "register_business_jurisdiction",
+    "serialize_business_jurisdiction",
+    "unregister_business_jurisdiction",
+]
